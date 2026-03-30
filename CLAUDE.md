@@ -126,16 +126,16 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 | | `junior_mint` | `Pubkey` | Junior tranche token mint |
 | **Voltr Integration** | `lp_custody` | `Pubkey` | ATA holding vault LP tokens |
 | | `asset_mint` | `Pubkey` | Underlying asset (e.g., USDC) |
-| **NAV Tracking** | `total_nav` | `u128` | Total net asset value (fixed-point) |
-| | `senior_nav` | `u128` | Senior tranche NAV |
-| | `junior_nav` | `u128` | Junior tranche NAV |
-| | `reserve_nav` | `u128` | Protocol reserve (accumulated fees) |
-| **Senior Target** | `senior_target_index` | `u128` | Compound growth index (init: 1e18) |
+| **NAV Tracking** | `total_nav` | `u128` | Total net asset value (Decimal bits via `to_decimal_bits()`) |
+| | `senior_nav` | `u128` | Senior tranche NAV (Decimal bits) |
+| | `junior_nav` | `u128` | Junior tranche NAV (Decimal bits) |
+| | `reserve_nav` | `u128` | Protocol reserve (Decimal bits) |
+| **Senior Target** | `senior_target_index` | `u128` | Compound growth index (Decimal bits, init: `Decimal::ONE`) |
 | | `index_timestamp` | `i64` | Last index update time |
 | **APR Parameters** | `apr_floor_bps` | `u16` | Minimum senior APR (basis points) |
 | | `risk_x_bps` | `u16` | Risk premium constant X |
 | | `risk_y_bps` | `u16` | Risk premium constant Y |
-| | `risk_k` | `u128` | Risk premium exponent K |
+| | `risk_k` | `u128` | Risk premium exponent K (Decimal bits) |
 | | `base_apr_bps` | `u16` | Current vault base APR |
 | **Fee Parameters** | `reserve_fee_bps` | `u16` | Performance fee (max 2000 = 20%) |
 | | `senior_exit_fee_bps` | `u16` | Senior withdrawal fee (max 100 = 1%) |
@@ -200,33 +200,50 @@ The `tranche_authority` PDA is the sole signer for all CPI calls to Voltr Vault 
 
 ---
 
-## 5. Fixed-Point Math Library
+## 5. Math Library
 
-All NAV, APR, and waterfall calculations use a custom fixed-point math module with **u128 precision** and **u256 intermediates** to prevent overflow.
+All NAV, APR, and waterfall calculations re-use the **Voltr Vault math utilities** (`voltr_vault::utils`), which provide `Decimal` (`U80F48` — 80-bit integer, 48-bit fractional binary fixed-point), `SafeMath`, `DecimalExtra`, and `U256` for wide intermediates. The tranching program's `math` module re-exports these types and adds tranching-specific constants. No custom fixed-point functions are needed.
 
-### 5.1 Constants
+### 5.1 Re-exported Types (from `voltr_vault::utils`)
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `PRECISION` | `1e18` (10^18) | Fixed-point scaling factor |
-| `BPS_PRECISION` | `10_000` | Basis points denominator |
-| `SECONDS_PER_YEAR` | `31_557_600` | APR annualization |
+| Type / Trait | Description |
+|-------------|-------------|
+| `Decimal` (`U80F48`) | Binary fixed-point type for ratios, indices, and per-share prices. Stored on-chain as `u128` via `to_decimal_bits()` / `from_decimal_bits()` |
+| `SafeMath` | Checked `safe_add`, `safe_sub`, `safe_mul`, `safe_div`, `safe_div_ceil` for `u128`, `u64`, `Decimal`, and other primitives |
+| `DecimalExtra` | `from_bps()`, `to_bps()`, `from_percent()`, `checked_pow()`, `mul_int_ratio()`, `full_mul_int_ratio()`, `to_floor()`, `to_ceil()` |
+| `CheckedCeilDiv` | `checked_ceil_div()` for integer types |
+| `U256` | 256-bit unsigned integer for overflow-safe wide intermediates in `full_mul_int_ratio()` |
 
-### 5.2 Core Functions
+### 5.2 Tranching-Specific Constants
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `fp_mul` | `(a: u128, b: u128) -> Option<u128>` | Multiply two fixed-point values |
-| `fp_div` | `(a: u128, b: u128) -> Option<u128>` | Divide two fixed-point values |
-| `mul_div` | `(a: u128, b: u128, c: u128) -> Option<u128>` | `(a * b) / c` with u256 intermediate |
-| `to_fp` | `(value: u64, decimals: u8) -> u128` | Raw token amount → fixed-point |
-| `from_fp` | `(value: u128, decimals: u8) -> u64` | Fixed-point → raw token amount |
+| Constant | Value | Type | Purpose |
+|----------|-------|------|---------|
+| `BPS_PRECISION` | `10_000` | `u16` | Basis points denominator |
+| `SECONDS_PER_YEAR` | `31_557_600` | `u64` | APR annualization (365.25 days) |
 
-### 5.3 Rounding Convention
+### 5.3 Math Patterns
 
-- **Round down** for minting (fewer tokens issued = protocol-favoring)
-- **Round up** for fees (more fee collected = protocol-favoring)
-- All operations use `checked_*` arithmetic; return `None` on overflow (no `unwrap()`)
+**Token amounts** stay as `u64`/`u128` and use `SafeMath` for checked integer arithmetic:
+```rust
+let fee = amount.safe_mul(fee_bps as u128)?.safe_div_ceil(BPS_PRECISION as u128)?;
+```
+
+**Ratios and indices** use `Decimal`, stored on-chain as `u128` (Decimal bits):
+```rust
+let ratio = Decimal::from_num(deposit_amount).full_mul_int_ratio(total_supply, total_nav);
+let tokens_to_mint: u64 = ratio.to_floor(); // round down for minting
+```
+
+**BPS conversions** use `DecimalExtra`:
+```rust
+let rate = Decimal::from_bps(500u64); // 5%
+```
+
+### 5.4 Rounding Convention
+
+- **`.to_floor()`** for minting / amounts out (fewer tokens issued = protocol-favoring)
+- **`.to_ceil()` / `safe_div_ceil()`** for fees / LP burns (more fee collected = protocol-favoring)
+- All operations use `checked_*` or `safe_*` arithmetic; no `unwrap()` in any math path
 
 ---
 
@@ -252,7 +269,7 @@ Creates a new TrancheConfig wrapping a Voltr Vault. Initializes all derived acco
 - `vault.withdrawal_waiting_period == 0` (v1 constraint)
 - Mint authority for both tranche mints = `tranche_authority`
 
-**Initial state:** `senior_target_index = 1e18`, `index_timestamp = Clock::now`
+**Initial state:** `senior_target_index = Decimal::ONE` (stored as `Decimal::ONE.to_decimal_bits()`), `index_timestamp = Clock::now`
 
 ---
 
@@ -538,10 +555,10 @@ Withdraws accumulated protocol reserve (performance fees):
 
 ### 10.3 Arithmetic Safety
 
-- All math uses `checked_*` operations via the fixed-point library
+- All math uses `checked_*` / `safe_*` operations via Voltr Vault's `Decimal` (U80F48) and `SafeMath` traits
 - No unchecked casts (u128 → u64 must be checked)
-- Rounding always favors the protocol
-- u256 intermediates prevent overflow in `mul_div`
+- Rounding always favors the protocol (`.to_floor()` for minting, `.to_ceil()` / `safe_div_ceil()` for fees)
+- U256 intermediates prevent overflow in `full_mul_int_ratio()` for large proportional calculations
 
 ---
 
@@ -559,7 +576,7 @@ Withdraws accumulated protocol reserve (performance fees):
 
 ### Phase 1: Foundation
 - VOL-5: Scaffold Anchor project (0.31.1 / Solana 2.1.21) — **Done**
-- VOL-6: Implement fixed-point math library (u128/u256)
+- VOL-6: Math module re-exporting Voltr Vault's Decimal (U80F48) / SafeMath utilities — **Done**
 - VOL-7: Define account structures (TrancheConfig, WithdrawReceipt, AprFeed)
 - VOL-8: Define error codes and event structs
 - VOL-9: Define PDA authority and seed constants
@@ -583,7 +600,7 @@ Withdraws accumulated protocol reserve (performance fees):
 - VOL-23: Implement withdraw_reserve instruction
 
 ### Phase 4: Testing & Security
-- VOL-24: Unit tests: fixed-point math library
+- VOL-24: Unit tests: math module (Decimal, SafeMath, rounding conventions)
 - VOL-25: Unit tests: waterfall yield distribution logic
 - VOL-26: Integration tests: full deposit/withdraw flows with Voltr CPI
 - VOL-27: Integration tests: coverage ratio and pause enforcement
@@ -601,7 +618,7 @@ Withdraws accumulated protocol reserve (performance fees):
 ## 13. Testing Strategy
 
 ### Unit Tests
-- Fixed-point math: edge cases (0, 1, u64::MAX, u128::MAX), rounding direction, overflow handling
+- Math module: Decimal arithmetic, SafeMath overflow, BPS conversions, rounding direction (floor vs ceil), `full_mul_int_ratio` with large values
 - Waterfall logic: 5 PRD test vectors, loss waterfall priority, risk premium formula, NAV invariant
 
 ### Integration Tests (LiteSVM)
