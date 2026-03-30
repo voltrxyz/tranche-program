@@ -1,12 +1,12 @@
 [package]
-name = "voltr-tranche-program"
+name = "voltr-tranching"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "voltr_tranche_program"
+name = "voltr_tranching"
 
 [features]
 default = []
@@ -14,9 +14,9 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
-
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
 anchor-lang = "0.31.1"
-
+anchor-spl = "0.31.1"
+voltr-vault = { path = "/Users/shayn/Desktop/voltr/voltr-vault-program/programs/voltr-vault", features = ["cpi"] }
