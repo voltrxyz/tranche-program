@@ -1,5 +1,15 @@
 # Voltr Tranching Program
 
+## Keeping This File Up to Date
+
+This `CLAUDE.md` serves as the single source of truth for all workspace agents. **Whenever you make changes that affect the architecture, account structures, math patterns, instruction flows, or implementation status described in this document, update the relevant sections of this file as part of the same PR.** This includes but is not limited to:
+- Updating math patterns, types, or function signatures (§5)
+- Adding/removing/renaming instructions or accounts (§3, §4, §6)
+- Changing error codes or events (§8, §9)
+- Updating security design or constraints (§10, §11)
+
+Do not let this document drift from the actual codebase.
+
 ## Skills & Tools
 
 Always load the following skills when working in this repository:
@@ -575,8 +585,8 @@ Withdraws accumulated protocol reserve (performance fees):
 ## 12. Implementation Phases
 
 ### Phase 1: Foundation
-- VOL-5: Scaffold Anchor project (0.31.1 / Solana 2.1.21) — **Done**
-- VOL-6: Math module re-exporting Voltr Vault's Decimal (U80F48) / SafeMath utilities — **Done**
+- VOL-5: Scaffold Anchor project (0.31.1 / Solana 2.1.21)
+- VOL-6: Math module re-exporting Voltr Vault's Decimal (U80F48) / SafeMath utilities
 - VOL-7: Define account structures (TrancheConfig, WithdrawReceipt, AprFeed)
 - VOL-8: Define error codes and event structs
 - VOL-9: Define PDA authority and seed constants
