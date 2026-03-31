@@ -76,4 +76,8 @@ pub mod voltr_tranching {
     pub fn complete_withdraw(ctx: Context<CompleteWithdraw>) -> Result<()> {
         instructions::complete_withdraw::handler(ctx)
     }
+
+    pub fn cancel_withdraw(ctx: Context<CancelWithdraw>) -> Result<()> {
+        instructions::cancel_withdraw::handler(ctx)
+    }
 }
