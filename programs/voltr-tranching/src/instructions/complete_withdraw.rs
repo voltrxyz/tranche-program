@@ -187,10 +187,8 @@ pub fn handler(ctx: Context<CompleteWithdraw>) -> Result<()> {
     require!(tranche_supply > 0, TrancheError::ZeroAmount);
     require!(tranche_nav > Decimal::ZERO, TrancheError::ZeroAmount);
 
-    let current_value = Decimal::from_num(tokens_escrowed).full_mul_int_ratio(
-        tranche_nav.to_decimal_bits(),
-        u128::from(tranche_supply),
-    );
+    let ratio = tranche_nav.safe_div(Decimal::from_num(tranche_supply))?;
+    let current_value = Decimal::from_num(tokens_escrowed).safe_mul(ratio)?;
 
     // Value cap: min(current_value, asset_amount_at_request)
     // Prevents gaming the cooldown period for yield
@@ -254,14 +252,15 @@ pub fn handler(ctx: Context<CompleteWithdraw>) -> Result<()> {
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let vault_post = ctx.accounts.vault.load()?;
-    let post_vault_total_value = vault_post.get_total_asset_value();
+    let post_vault = ctx.accounts.vault.load()?;
+    let post_vault_total_value = post_vault.get_total_asset_value();
     let post_vault_lp_supply =
-        vault_post.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
-    drop(vault_post);
+        post_vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    drop(post_vault);
 
-    let actual_value_lost =
-        Decimal::from_num(lp_burned).full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    // Value the burned LP at post-CPI prices (reflects management fee accrual)
+    let actual_value_lost = Decimal::from_num(lp_burned)
+        .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
 
     // -- 7. Transfer: asset_escrow -> user -----------------------------------
     token::transfer(

@@ -152,23 +152,17 @@ pub fn handler(
     require!(senior_nav > Decimal::ZERO, TrancheError::ZeroAmount);
 
     let (token_amount, asset_value) = if is_token_amount {
-        // `amount` is in tranche tokens; compute asset value
-        let asset_val = Decimal::from_num(amount).full_mul_int_ratio(
-            senior_nav.to_decimal_bits(),
-            u128::from(senior_supply),
-        );
+        // `amount` is in tranche tokens; asset_value = amount * nav / supply
+        let ratio = senior_nav.safe_div(Decimal::from_num(senior_supply))?;
+        let asset_val = Decimal::from_num(amount).safe_mul(ratio)?;
         (amount, asset_val)
     } else {
-        // `amount` is in asset terms; compute token amount
-        let tokens = Decimal::from_num(amount).full_mul_int_ratio(
-            u128::from(senior_supply),
-            senior_nav.to_decimal_bits(),
-        );
-        let token_amt: u64 = tokens.to_ceil(); // round up tokens burned (protocol-favoring)
-        let asset_val = Decimal::from_num(token_amt).full_mul_int_ratio(
-            senior_nav.to_decimal_bits(),
-            u128::from(senior_supply),
-        );
+        // `amount` is in asset terms; tokens = amount * supply / nav
+        let ratio = Decimal::from_num(senior_supply).safe_div(senior_nav)?;
+        let token_amt: u64 = Decimal::from_num(amount).safe_mul(ratio)?.to_ceil(); // round up tokens burned (protocol-favoring)
+        // Recompute asset value from actual token amount
+        let nav_ratio = senior_nav.safe_div(Decimal::from_num(senior_supply))?;
+        let asset_val = Decimal::from_num(token_amt).safe_mul(nav_ratio)?;
         (token_amt, asset_val)
     };
 
