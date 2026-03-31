@@ -538,6 +538,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `RequestWithdrawEvent` | user, receipt_id, is_senior, tokens_escrowed, asset_value, timestamp | `request_withdraw_*` |
 | `CompleteWithdrawEvent` | user, receipt_id, is_senior, final_value, tokens_burned | `complete_withdraw` |
 | `CancelWithdrawEvent` | user, receipt_id, tokens_returned | `cancel_withdraw` |
+| `UpdateTrancheConfigEvent` | authority, field_index, slot | `update_tranche_config` |
 | `CrankAccountingEvent` | delta, senior_nav, junior_nav, reserve_nav, total_nav, base_apr, coverage_ratio, slot | `crank_accounting` |
 
 ---
