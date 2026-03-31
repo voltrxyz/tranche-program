@@ -11,13 +11,109 @@ use crate::math::{
 use crate::state::TrancheConfig;
 
 /// Reads a `DecimalBits` field (little-endian `[u8; 16]`) back into a `Decimal`.
-fn read_decimal(bits: &[u8; 16]) -> Decimal {
+pub(crate) fn read_decimal(bits: &[u8; 16]) -> Decimal {
     Decimal::from_decimal_bits(u128::from_le_bytes(*bits))
 }
 
 /// Writes a `Decimal` value into its `DecimalBits` representation.
-fn write_decimal(val: Decimal) -> [u8; 16] {
+pub(crate) fn write_decimal(val: Decimal) -> [u8; 16] {
     val.to_decimal_bits().to_le_bytes()
+}
+
+/// Result of running inline crank accounting.
+pub(crate) struct InlineCrankResult {
+    pub delta: i128,
+    pub senior_nav: Decimal,
+    pub junior_nav: Decimal,
+    pub reserve_nav: Decimal,
+    pub total_nav: Decimal,
+}
+
+/// Core accounting logic shared by the standalone `crank_accounting` instruction
+/// and inlined into deposit/withdraw instructions for fresh NAV pricing.
+pub(crate) fn run_inline_crank(
+    config: &mut TrancheConfig,
+    vault_total_value: u64,
+    vault_lp_supply: u64,
+    our_lp_balance: u64,
+    junior_supply: u64,
+    now: i64,
+) -> Result<InlineCrankResult> {
+    // Compute current NAV from vault state
+    let current_nav = if vault_lp_supply == 0 {
+        Decimal::ZERO
+    } else {
+        Decimal::from_num(our_lp_balance).full_mul_int_ratio(vault_total_value, vault_lp_supply)
+    };
+
+    let total_nav = read_decimal(&config.total_nav);
+    let mut senior_nav = read_decimal(&config.senior_nav);
+    let mut junior_nav = read_decimal(&config.junior_nav);
+    let mut reserve_nav = read_decimal(&config.reserve_nav);
+
+    let delta: i128;
+
+    if current_nav >= total_nav {
+        // ── GAIN PATH ────────────────────────────────────────────────
+        let gain = current_nav.safe_sub(total_nav)?;
+        delta = gain.to_decimal_bits() as i128;
+
+        let senior_apr = if gain > Decimal::ZERO {
+            compute_senior_apr(config, senior_nav, current_nav)?
+        } else {
+            Decimal::ZERO
+        };
+        let (new_index, new_index_timestamp, growth) = apply_senior_target_accrual(
+            read_decimal(&config.senior_target_index),
+            config.index_timestamp,
+            now,
+            senior_apr,
+            gain > Decimal::ZERO,
+        )?;
+        config.senior_target_index = write_decimal(new_index);
+        config.index_timestamp = new_index_timestamp;
+
+        let result = apply_gain_waterfall(
+            gain,
+            senior_nav,
+            junior_nav,
+            reserve_nav,
+            config.reserve_fee_bps,
+            growth,
+        )?;
+        senior_nav = result.senior_nav;
+        junior_nav = result.junior_nav;
+        reserve_nav = result.reserve_nav;
+    } else {
+        // ── LOSS PATH ────────────────────────────────────────────────
+        let loss = total_nav.safe_sub(current_nav)?;
+        delta = -(loss.to_decimal_bits() as i128);
+
+        let result = apply_loss_waterfall(loss, senior_nav, junior_nav, reserve_nav)?;
+        senior_nav = result.senior_nav;
+        junior_nav = result.junior_nav;
+        reserve_nav = result.reserve_nav;
+    }
+
+    // Write updated NAVs
+    let new_total_nav = senior_nav.safe_add(junior_nav)?.safe_add(reserve_nav)?;
+    config.total_nav = write_decimal(new_total_nav);
+    config.senior_nav = write_decimal(senior_nav);
+    config.junior_nav = write_decimal(junior_nav);
+    config.reserve_nav = write_decimal(reserve_nav);
+
+    // Auto-pause on junior shortfall
+    if junior_nav == Decimal::ZERO && junior_supply > 0 {
+        config.paused |= 0x01 | 0x02;
+    }
+
+    Ok(InlineCrankResult {
+        delta,
+        senior_nav,
+        junior_nav,
+        reserve_nav,
+        total_nav: new_total_nav,
+    })
 }
 
 fn apply_senior_target_accrual(
@@ -190,100 +286,38 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
         TrancheError::InvalidVault
     );
 
-    // ── 3. Compute current NAV from vault state ──────────────────────────
-    let current_nav = if vault_lp_supply == 0 {
-        Decimal::ZERO
-    } else {
-        Decimal::from_num(our_lp_balance).full_mul_int_ratio(vault_total_value, vault_lp_supply)
-    };
-
-    let total_nav = read_decimal(&config.total_nav);
-    let mut senior_nav = read_decimal(&config.senior_nav);
-    let mut junior_nav = read_decimal(&config.junior_nav);
-    let mut reserve_nav = read_decimal(&config.reserve_nav);
-
     let now = Clock::get()?.unix_timestamp;
+    let junior_supply = ctx.accounts.junior_mint.supply;
 
-    // ── 4. Compute delta and apply waterfall ─────────────────────────────
-    let delta: i128;
+    // ── 3. Run inline crank accounting ────────────────────────────────────
+    let result = run_inline_crank(
+        &mut config,
+        vault_total_value,
+        vault_lp_supply,
+        our_lp_balance,
+        junior_supply,
+        now,
+    )?;
 
-    if current_nav >= total_nav {
-        // ── GAIN PATH ────────────────────────────────────────────────
-        let gain = current_nav.safe_sub(total_nav)?;
-        delta = gain.to_decimal_bits() as i128;
-
-        let senior_apr = if gain > Decimal::ZERO {
-            compute_senior_apr(&config, senior_nav, current_nav)?
-        } else {
-            Decimal::ZERO
-        };
-        let (new_index, new_index_timestamp, growth) = apply_senior_target_accrual(
-            read_decimal(&config.senior_target_index),
-            config.index_timestamp,
-            now,
-            senior_apr,
-            gain > Decimal::ZERO,
-        )?;
-        config.senior_target_index = write_decimal(new_index);
-        config.index_timestamp = new_index_timestamp;
-
-        if gain > Decimal::ZERO {
-            let result = apply_gain_waterfall(
-                gain,
-                senior_nav,
-                junior_nav,
-                reserve_nav,
-                config.reserve_fee_bps,
-                growth,
-            )?;
-            senior_nav = result.senior_nav;
-            junior_nav = result.junior_nav;
-            reserve_nav = result.reserve_nav;
-        }
-    } else {
-        // ── LOSS PATH ────────────────────────────────────────────────
-        let loss = total_nav.safe_sub(current_nav)?;
-        delta = -(loss.to_decimal_bits() as i128);
-
-        let result = apply_loss_waterfall(loss, senior_nav, junior_nav, reserve_nav)?;
-        senior_nav = result.senior_nav;
-        junior_nav = result.junior_nav;
-        reserve_nav = result.reserve_nav;
-    }
-
-    // ── 5. Write updated NAVs ────────────────────────────────────────────
-    let new_total_nav = senior_nav.safe_add(junior_nav)?.safe_add(reserve_nav)?;
-    config.total_nav = write_decimal(new_total_nav);
-    config.senior_nav = write_decimal(senior_nav);
-    config.junior_nav = write_decimal(junior_nav);
-    config.reserve_nav = write_decimal(reserve_nav);
-
-    // ── 6. Auto-pause on junior shortfall ────────────────────────────────
-    // If junior tokens exist but junior NAV is zero, junior price-per-share
-    // has collapsed -- pause deposits to protect new depositors.
-    if junior_nav == Decimal::ZERO && ctx.accounts.junior_mint.supply > 0 {
-        config.paused |= 0x01 | 0x02;
-    }
-
-    // ── 7. Build event fields before dropping config ─────────────────────
+    // ── 4. Build event fields before dropping config ─────────────────────
     let base_apr = config.base_apr_bps;
-    let coverage_ratio = if senior_nav > Decimal::ZERO {
-        new_total_nav.safe_div(senior_nav)?.to_decimal_bits()
+    let coverage_ratio = if result.senior_nav > Decimal::ZERO {
+        result.total_nav.safe_div(result.senior_nav)?.to_decimal_bits()
     } else {
         0u128
     };
 
     drop(config);
 
-    // ── 8. Emit event ────────────────────────────────────────────────────
+    // ── 5. Emit event ────────────────────────────────────────────────────
     let slot = Clock::get()?.slot;
 
     emit!(CrankAccountingEvent {
-        delta,
-        senior_nav: senior_nav.to_decimal_bits(),
-        junior_nav: junior_nav.to_decimal_bits(),
-        reserve_nav: reserve_nav.to_decimal_bits(),
-        total_nav: new_total_nav.to_decimal_bits(),
+        delta: result.delta,
+        senior_nav: result.senior_nav.to_decimal_bits(),
+        junior_nav: result.junior_nav.to_decimal_bits(),
+        reserve_nav: result.reserve_nav.to_decimal_bits(),
+        total_nav: result.total_nav.to_decimal_bits(),
         base_apr,
         coverage_ratio,
         slot,
