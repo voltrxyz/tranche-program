@@ -526,6 +526,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `VaultWaitingPeriodNotZero` | Vault has non-zero withdrawal waiting period (v1 unsupported) |
 | `InvalidVault` | Vault account mismatch or wrong owner |
 | `InvalidPauseFlags` | `set_paused` received bits outside `0x0F` |
+| `CooldownMustBeZero` | `instant_withdraw_*` when tranche cooldown_seconds != 0 |
 
 ---
 
@@ -538,6 +539,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `RequestWithdrawEvent` | user, receipt_id, is_senior, tokens_escrowed, asset_value, timestamp | `request_withdraw_*` |
 | `CompleteWithdrawEvent` | user, receipt_id, is_senior, final_value, tokens_burned | `complete_withdraw` |
 | `CancelWithdrawEvent` | user, receipt_id, tokens_returned | `cancel_withdraw` |
+| `InstantWithdrawEvent` | user, is_senior, asset_amount, tokens_burned | `instant_withdraw_senior`, `instant_withdraw_junior` |
 | `UpdateTrancheConfigEvent` | authority, field_index, slot | `update_tranche_config` |
 | `CrankAccountingEvent` | delta, senior_nav, junior_nav, reserve_nav, total_nav, base_apr, coverage_ratio, slot | `crank_accounting` |
 
