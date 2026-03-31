@@ -21,4 +21,8 @@ pub mod voltr_tranching {
     ) -> Result<()> {
         instructions::initialize_tranche_config::handler(ctx, params)
     }
+
+    pub fn crank_accounting(ctx: Context<CrankAccounting>) -> Result<()> {
+        instructions::crank_accounting::handler(ctx)
+    }
 }
