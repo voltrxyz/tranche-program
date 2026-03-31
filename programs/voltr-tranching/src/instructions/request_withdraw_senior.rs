@@ -181,9 +181,11 @@ pub fn handler(
     );
     let net_asset = asset_value.safe_sub(fee)?;
 
-    // Add fee to reserve_nav
+    // Add fee to reserve_nav, debit from senior_nav (internal reallocation)
     let new_reserve_nav = read_decimal(&config.reserve_nav).safe_add(fee)?;
     config.reserve_nav = write_decimal(new_reserve_nav);
+    let new_senior_nav = read_decimal(&config.senior_nav).safe_sub(fee)?;
+    config.senior_nav = write_decimal(new_senior_nav);
 
     // ── 7. Create WithdrawReceipt ────────────────────────────────────────
     let receipt_id = config.next_receipt_id;
