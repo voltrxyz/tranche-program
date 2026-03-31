@@ -152,20 +152,24 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
     // set the senior deposit pause bit during the waterfall above.
     require!(config.paused & 0x01 == 0, TrancheError::SeniorDepositsPaused);
 
-    // ── 5. Pre-CPI coverage check (conservative fast-fail using `amount`) ─
-    // Uses `amount` (>= effective_deposit) so this is a lower bound on
-    // the post-deposit coverage ratio; will never false-reject.
-    let deposit_decimal = Decimal::from_num(amount);
-    let post_total = crank_result.total_nav.safe_add(deposit_decimal)?;
-    let post_senior = crank_result.senior_nav.safe_add(deposit_decimal)?;
-
-    let lhs = post_total.safe_mul(Decimal::from_num(BPS_PRECISION))?;
-    let rhs = post_senior.safe_mul(Decimal::from_num(config.min_coverage_buffer_bps))?;
-    require!(lhs >= rhs, TrancheError::InsufficientCoverage);
+    // ── 5. Pre-CPI coverage gate (min_coverage_for_mint_bps) ─────────────
+    // Current coverage must meet the minimum threshold before any senior deposit.
+    if crank_result.senior_nav > Decimal::ZERO {
+        let current_coverage_lhs =
+            crank_result.total_nav.safe_mul(Decimal::from_num(BPS_PRECISION))?;
+        let current_coverage_rhs =
+            crank_result.senior_nav.safe_mul(Decimal::from_num(config.min_coverage_for_mint_bps))?;
+        require!(
+            current_coverage_lhs >= current_coverage_rhs,
+            TrancheError::InsufficientCoverage
+        );
+    }
 
     // Save values needed after CPI before dropping config
     let tranche_authority_bump = config.tranche_authority_bump;
     let senior_nav_before = crank_result.senior_nav;
+    let total_nav_before = crank_result.total_nav;
+    let min_coverage_buffer_bps = config.min_coverage_buffer_bps;
     let senior_supply = ctx.accounts.senior_mint.supply;
 
     drop(config);
@@ -218,10 +222,16 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
     )?;
 
     // ── 8. Compute effective deposit from actual LP delta ────────────────
-    // The vault may have taken an issuance fee / dead-weight, so the LP
-    // tokens we received represent less value than `amount`.  Use pre-CPI
-    // vault pricing to convert the LP delta back into asset terms.
+    // The vault may apply management fees during CPI (minting fee LP before
+    // pricing), so we must use post-CPI vault state for accurate pricing.
     ctx.accounts.vault_lp_custody.reload()?;
+    ctx.accounts.vault_lp_mint.reload()?;
+    let post_vault = ctx.accounts.vault.load()?;
+    let post_vault_total_value = post_vault.get_total_asset_value();
+    let post_vault_lp_supply =
+        post_vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    drop(post_vault);
+
     let lp_gained = ctx
         .accounts
         .vault_lp_custody
@@ -229,14 +239,22 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
         .checked_sub(lp_balance_before)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let effective_deposit = if vault_lp_supply == 0 {
+    let effective_deposit = if post_vault_lp_supply == 0 {
         // First vault deposit — no existing pricing reference
         Decimal::from_num(amount)
     } else {
-        Decimal::from_num(lp_gained).full_mul_int_ratio(vault_total_value, vault_lp_supply)
+        Decimal::from_num(lp_gained)
+            .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply)
     };
 
-    // ── 9. Calculate senior tokens to mint ───────────────────────────────
+    // ── 9. Post-CPI coverage buffer check (using actual effective_deposit) ─
+    let post_total = total_nav_before.safe_add(effective_deposit)?;
+    let post_senior = senior_nav_before.safe_add(effective_deposit)?;
+    let lhs = post_total.safe_mul(Decimal::from_num(BPS_PRECISION))?;
+    let rhs = post_senior.safe_mul(Decimal::from_num(min_coverage_buffer_bps))?;
+    require!(lhs >= rhs, TrancheError::InsufficientCoverage);
+
+    // ── 10. Calculate senior tokens to mint ──────────────────────────────
     let tokens_to_mint = if senior_supply == 0 {
         // First deposit: 1:1 with effective value
         effective_deposit.to_floor::<u64>()
@@ -249,7 +267,7 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
     // Reject dust deposits that round to zero shares
     require!(tokens_to_mint > 0, TrancheError::ZeroAmount);
 
-    // ── 10. Mint senior tokens to user ───────────────────────────────────
+    // ── 11. Mint senior tokens to user ───────────────────────────────────
     token::mint_to(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -263,7 +281,7 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
         tokens_to_mint,
     )?;
 
-    // ── 11. Update NAVs with effective deposit ───────────────────────────
+    // ── 12. Update NAVs with effective deposit ───────────────────────────
     let mut config = ctx.accounts.tranche_config.load_mut()?;
     let new_senior_nav = read_decimal(&config.senior_nav).safe_add(effective_deposit)?;
     let new_total_nav = read_decimal(&config.total_nav).safe_add(effective_deposit)?;
@@ -271,7 +289,7 @@ pub fn handler(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
     config.total_nav = write_decimal(new_total_nav);
     drop(config);
 
-    // ── 12. Emit event ───────────────────────────────────────────────────
+    // ── 13. Emit event ───────────────────────────────────────────────────
     let coverage_ratio = if new_senior_nav > Decimal::ZERO {
         new_total_nav
             .safe_div(new_senior_nav)?

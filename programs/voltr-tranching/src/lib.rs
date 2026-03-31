@@ -53,6 +53,10 @@ pub mod voltr_tranching {
         instructions::deposit_senior::handler(ctx, amount)
     }
 
+    pub fn deposit_junior(ctx: Context<DepositJunior>, amount: u64) -> Result<()> {
+        instructions::deposit_junior::handler(ctx, amount)
+    }
+
     pub fn request_withdraw_senior(
         ctx: Context<RequestWithdrawSenior>,
         amount: u64,

@@ -161,7 +161,7 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 | **Operational** | `paused` | `u8` | Bitflag pause state (see §6.2) |
 | | `next_receipt_id` | `u64` | Auto-incrementing receipt counter |
 | | `bumps` | various | PDA bumps for all derived accounts |
-| **Reserved** | `_reserved` | `[u8; 256]` | Future expansion |
+| **Reserved** | `_reserved` | `[u8; 248]` | Future expansion |
 
 ### 3.2 WithdrawReceipt (standard account)
 
