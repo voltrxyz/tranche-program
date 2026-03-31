@@ -48,4 +48,8 @@ pub mod voltr_tranching {
     pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
         instructions::accept_authority::handler(ctx)
     }
+
+    pub fn deposit_senior(ctx: Context<DepositSenior>, amount: u64) -> Result<()> {
+        instructions::deposit_senior::handler(ctx, amount)
+    }
 }
