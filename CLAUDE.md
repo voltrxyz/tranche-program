@@ -2,13 +2,13 @@
 
 ## Keeping This File Up to Date
 
-This `CLAUDE.md` serves as the single source of truth for all workspace agents. **Whenever you make changes that affect the architecture, account structures, math patterns, instruction flows, or implementation status described in this document, update the relevant sections of this file as part of the same PR.** This includes but is not limited to:
+This `CLAUDE.md` serves as the single source of truth for all workspace agents. **Whenever you make changes that affect the architecture, account structures, math patterns, instruction flows, or security constraints described in this document, update the relevant sections of this file as part of the same PR.** This includes but is not limited to:
 - Updating math patterns, types, or function signatures (§5)
 - Adding/removing/renaming instructions or accounts (§3, §4, §6)
 - Changing error codes or events (§8, §9)
 - Updating security design or constraints (§10, §11)
 
-Do not let this document drift from the actual codebase.
+Do not let this document drift from the actual codebase. The phase/ticket checklist is roadmap context, not a per-PR implementation status tracker, so it does not need to be updated whenever a ticket is implemented.
 
 ## Skills & Tools
 
@@ -20,7 +20,7 @@ Always load the following skills when working in this repository:
 
 ### Required MCP Servers (pre-installed)
 - **`solana-mcp-server`** — Use `Solana_Documentation_Search` for SDK/runtime questions, `Ask_Solana_Anchor_Framework_Expert` for Anchor-specific patterns, and `Solana_Expert__Ask_For_Help` for general Solana help.
-- **`linear`** — All project tickets are tracked in Linear under the "Voltr Tranching Program" project. Reference tickets by VOL-{number}.
+- **`linear`** — All project tickets are tracked in Linear under the "Voltr Tranching Program" project. Reference tickets by VOL-{number}. When you are explicitly tasked with creating a PR for a completed ticket, mark that Linear ticket as `Done` after the PR is created.
 
 ### Recommended Plugins (install if missing)
 
@@ -48,6 +48,7 @@ claude plugin install property-based-testing
 | Reviewing code quality | `/simplify` |
 | Security review before audit | `building-secure-contracts` + `/solana-dev` security checklist |
 | Checking ticket requirements | `linear` MCP → `get_issue` with VOL-{number} |
+| Creating a PR for a ticket | `gh pr create`, then update the matching Linear ticket to `Done` |
 | Building/testing | `NO_DNA=1 anchor build`, `NO_DNA=1 anchor test` |
 
 ---

@@ -1,0 +1,3 @@
+pub mod initialize_tranche_config;
+
+pub use initialize_tranche_config::*;

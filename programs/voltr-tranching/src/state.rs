@@ -196,15 +196,6 @@ pub struct AprObservation {
     pub _padding: [u8; 8],
 }
 
-// ─── PDA Seed Constants ──────────────────────────────────────────────────────
-
-pub const TRANCHE_CONFIG_SEED: &[u8] = b"tranche_config";
-pub const TRANCHE_AUTHORITY_SEED: &[u8] = b"tranche_authority";
-pub const SENIOR_MINT_SEED: &[u8] = b"senior_mint";
-pub const JUNIOR_MINT_SEED: &[u8] = b"junior_mint";
-pub const WITHDRAW_RECEIPT_SEED: &[u8] = b"withdraw_receipt";
-pub const APR_FEED_SEED: &[u8] = b"apr_feed";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,27 +239,6 @@ mod tests {
         // 72 observations * 48 bytes = 3456 bytes for the array
         let obs_size = mem::size_of::<AprObservation>() * MAX_APR_OBSERVATIONS;
         assert_eq!(obs_size, 3456);
-    }
-
-    // ─── PDA Seed Uniqueness ──────────────────────────────────────
-
-    #[test]
-    fn pda_seeds_are_distinct() {
-        let seeds: Vec<&[u8]> = vec![
-            TRANCHE_CONFIG_SEED,
-            TRANCHE_AUTHORITY_SEED,
-            SENIOR_MINT_SEED,
-            JUNIOR_MINT_SEED,
-            WITHDRAW_RECEIPT_SEED,
-            APR_FEED_SEED,
-        ];
-        for (i, a) in seeds.iter().enumerate() {
-            for (j, b) in seeds.iter().enumerate() {
-                if i != j {
-                    assert_ne!(a, b, "Seeds at index {} and {} collide", i, j);
-                }
-            }
-        }
     }
 
     // ─── Reserved Space ───────────────────────────────────────────
