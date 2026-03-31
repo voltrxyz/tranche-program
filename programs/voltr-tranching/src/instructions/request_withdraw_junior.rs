@@ -179,9 +179,11 @@ pub fn handler(
     );
     let net_asset = asset_value.safe_sub(fee)?;
 
-    // Add fee to reserve_nav
+    // Add fee to reserve_nav, debit from junior_nav (internal reallocation)
     let new_reserve_nav = read_decimal(&config.reserve_nav).safe_add(fee)?;
     config.reserve_nav = write_decimal(new_reserve_nav);
+    let new_junior_nav = read_decimal(&config.junior_nav).safe_sub(fee)?;
+    config.junior_nav = write_decimal(new_junior_nav);
 
     // ── 7. Junior ratio check ──────────────────────────────────────────
     // After withdrawal, junior_nav - asset_value must remain >= senior_nav * min_jr_sr_ratio_bps / 10_000

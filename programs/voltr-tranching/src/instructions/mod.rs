@@ -1,5 +1,6 @@
 pub mod accept_authority;
 pub mod cancel_withdraw;
+pub mod complete_withdraw;
 pub mod crank_accounting;
 pub mod deposit_junior;
 pub mod deposit_senior;
@@ -14,6 +15,7 @@ pub mod update_tranche_config;
 #[allow(ambiguous_glob_reexports)]
 pub use accept_authority::*;
 pub use cancel_withdraw::*;
+pub use complete_withdraw::*;
 pub use crank_accounting::*;
 pub use deposit_junior::*;
 pub use deposit_senior::*;

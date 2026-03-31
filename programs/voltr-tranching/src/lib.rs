@@ -73,6 +73,10 @@ pub mod voltr_tranching {
         instructions::request_withdraw_junior::handler(ctx, amount, is_token_amount)
     }
 
+    pub fn complete_withdraw(ctx: Context<CompleteWithdraw>) -> Result<()> {
+        instructions::complete_withdraw::handler(ctx)
+    }
+
     pub fn cancel_withdraw(ctx: Context<CancelWithdraw>) -> Result<()> {
         instructions::cancel_withdraw::handler(ctx)
     }
