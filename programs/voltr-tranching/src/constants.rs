@@ -24,6 +24,12 @@ pub const WITHDRAW_RECEIPT_SEED: &[u8] = b"withdraw_receipt";
 /// Derivation: `[APR_FEED_SEED, tranche_config.key().as_ref()]`
 pub const APR_FEED_SEED: &[u8] = b"apr_feed";
 
+/// Maximum reserve fee in basis points (20%).
+pub const MAX_RESERVE_FEE_BPS: u16 = 2000;
+
+/// Maximum exit fee in basis points (1%), applies to both senior and junior.
+pub const MAX_EXIT_FEE_BPS: u16 = 100;
+
 #[cfg(test)]
 mod tests {
     use super::*;

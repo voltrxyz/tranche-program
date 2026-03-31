@@ -21,4 +21,11 @@ pub mod voltr_tranching {
     ) -> Result<()> {
         instructions::initialize_tranche_config::handler(ctx, params)
     }
+
+    pub fn update_tranche_config(
+        ctx: Context<UpdateTrancheConfig>,
+        field: TrancheConfigField,
+    ) -> Result<()> {
+        instructions::update_tranche_config::handler(ctx, field)
+    }
 }

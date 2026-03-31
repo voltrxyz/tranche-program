@@ -51,6 +51,14 @@ pub struct CancelWithdrawEvent {
 
 #[event]
 #[derive(Default)]
+pub struct UpdateTrancheConfigEvent {
+    pub authority: Pubkey,
+    pub field_index: u8,
+    pub slot: u64,
+}
+
+#[event]
+#[derive(Default)]
 pub struct CrankAccountingEvent {
     pub delta: i128,
     pub senior_nav: u128,

@@ -123,9 +123,9 @@ pub fn handler(
     drop(vault);
 
     // ── Validate fee parameters ─────────────────────────────────────
-    require!(params.reserve_fee_bps <= 2000, TrancheError::InvalidFee);
-    require!(params.senior_exit_fee_bps <= 100, TrancheError::InvalidFee);
-    require!(params.junior_exit_fee_bps <= 100, TrancheError::InvalidFee);
+    require!(params.reserve_fee_bps <= MAX_RESERVE_FEE_BPS, TrancheError::InvalidFee);
+    require!(params.senior_exit_fee_bps <= MAX_EXIT_FEE_BPS, TrancheError::InvalidFee);
+    require!(params.junior_exit_fee_bps <= MAX_EXIT_FEE_BPS, TrancheError::InvalidFee);
 
     // ── Initialize TrancheConfig ────────────────────────────────────
     let mut config = ctx.accounts.tranche_config.load_init()?;
