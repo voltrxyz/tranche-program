@@ -80,4 +80,8 @@ pub mod voltr_tranching {
     pub fn cancel_withdraw(ctx: Context<CancelWithdraw>) -> Result<()> {
         instructions::cancel_withdraw::handler(ctx)
     }
+
+    pub fn withdraw_reserve(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
+        instructions::withdraw_reserve::handler(ctx, amount)
+    }
 }

@@ -69,3 +69,12 @@ pub struct CrankAccountingEvent {
     pub coverage_ratio: u128,
     pub slot: u64,
 }
+
+#[event]
+#[derive(Default)]
+pub struct WithdrawReserveEvent {
+    pub authority: Pubkey,
+    pub amount_withdrawn: u64,
+    pub reserve_nav_after: u128,
+    pub total_nav_after: u128,
+}

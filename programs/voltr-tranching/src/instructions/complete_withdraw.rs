@@ -243,16 +243,25 @@ pub fn handler(ctx: Context<CompleteWithdraw>) -> Result<()> {
         false, // is_withdraw_all = false
     )?;
 
-    // -- 6b. Measure actual LP burned (may exceed proportional due to Voltr fee)
+    // -- 6b. Measure actual LP burned using post-CPI vault state -------------
+    // Reload after CPI so pricing reflects any management fee accrued inside
+    // the vault's `handle_management_fee()` call.
     ctx.accounts.vault_lp_custody.reload()?;
+    ctx.accounts.vault_lp_mint.reload()?;
+
     let lp_after = ctx.accounts.vault_lp_custody.amount;
     let lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    // Actual value lost from our LP position (uses pre-CPI vault state)
+    let vault_post = ctx.accounts.vault.load()?;
+    let post_vault_total_value = vault_post.get_total_asset_value();
+    let post_vault_lp_supply =
+        vault_post.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    drop(vault_post);
+
     let actual_value_lost =
-        Decimal::from_num(lp_burned).full_mul_int_ratio(vault_total_value, vault_lp_supply);
+        Decimal::from_num(lp_burned).full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
 
     // -- 7. Transfer: asset_escrow -> user -----------------------------------
     token::transfer(
