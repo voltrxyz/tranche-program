@@ -241,22 +241,22 @@ pub fn handler(ctx: Context<CompleteWithdraw>) -> Result<()> {
         false, // is_withdraw_all = false
     )?;
 
-    // -- 6b. Measure actual LP burned using post-CPI vault state ────────────
-    // The vault may accrue management fees during CPI (minting fee LP before
-    // pricing the withdrawal), so we must reload vault state for accurate
-    // LP valuation. Using pre-CPI state would over-decrement tranche NAV.
+    // -- 6b. Measure actual LP burned using post-CPI vault state -------------
+    // Reload after CPI so pricing reflects any management fee accrued inside
+    // the vault's `handle_management_fee()` call.
     ctx.accounts.vault_lp_custody.reload()?;
     ctx.accounts.vault_lp_mint.reload()?;
-    let post_vault = ctx.accounts.vault.load()?;
-    let post_vault_total_value = post_vault.get_total_asset_value();
-    let post_vault_lp_supply =
-        post_vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
-    drop(post_vault);
 
     let lp_after = ctx.accounts.vault_lp_custody.amount;
     let lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
+
+    let post_vault = ctx.accounts.vault.load()?;
+    let post_vault_total_value = post_vault.get_total_asset_value();
+    let post_vault_lp_supply =
+        post_vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    drop(post_vault);
 
     // Value the burned LP at post-CPI prices (reflects management fee accrual)
     let actual_value_lost = Decimal::from_num(lp_burned)

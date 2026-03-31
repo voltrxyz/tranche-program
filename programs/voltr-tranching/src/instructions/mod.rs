@@ -13,6 +13,7 @@ pub mod request_withdraw_senior;
 pub mod set_paused;
 pub mod transfer_authority;
 pub mod update_tranche_config;
+pub mod withdraw_reserve;
 
 #[allow(ambiguous_glob_reexports)]
 pub use accept_authority::*;
@@ -30,3 +31,4 @@ pub use request_withdraw_senior::*;
 pub use set_paused::*;
 pub use transfer_authority::*;
 pub use update_tranche_config::*;
+pub use withdraw_reserve::*;
