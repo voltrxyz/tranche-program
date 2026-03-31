@@ -148,7 +148,7 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 | **APR Parameters** | `apr_floor_bps` | `u16` | Minimum senior APR (basis points) |
 | | `risk_x_bps` | `u16` | Risk premium constant X |
 | | `risk_y_bps` | `u16` | Risk premium constant Y |
-| | `risk_k` | `DecimalBits` | Risk premium exponent K (little-endian Decimal bits) |
+| | `risk_k` | `DecimalBits` | Risk premium exponent K (stored as Decimal bits but must encode a whole-number `u32` exponent in v1) |
 | | `base_apr_bps` | `u16` | Current vault base APR |
 | **Fee Parameters** | `reserve_fee_bps` | `u16` | Performance fee (max 2000 = 20%) |
 | | `senior_exit_fee_bps` | `u16` | Senior withdrawal fee (max 100 = 1%) |
@@ -281,6 +281,7 @@ Creates a new TrancheConfig wrapping a Voltr Vault. Initializes all derived acco
 - Voltr Vault account `owner == voltr_vault::ID`
 - `vault.withdrawal_waiting_period == 0` (v1 constraint)
 - Mint authority for both tranche mints = `tranche_authority`
+- `risk_k` must be a whole-number exponent representable as `u32`
 
 **Initial state:** `senior_target_index = Decimal::ONE` (stored as `Decimal::ONE.to_decimal_bits().to_le_bytes()`), `index_timestamp = Clock::now`
 
@@ -438,7 +439,7 @@ Uses an enum `TrancheConfigField` pattern (one field per call). Updatable fields
 | Field | Max Value | Notes |
 |-------|-----------|-------|
 | `apr_floor_bps` | — | Minimum senior APR |
-| `risk_x_bps`, `risk_y_bps`, `risk_k` | — | Risk premium curve |
+| `risk_x_bps`, `risk_y_bps`, `risk_k` | — | Risk premium curve (`risk_k` must be a whole-number `u32` in v1) |
 | `reserve_fee_bps` | 2000 (20%) | Performance fee |
 | `senior_exit_fee_bps` | 100 (1%) | Senior exit fee |
 | `junior_exit_fee_bps` | 100 (1%) | Junior exit fee |
@@ -448,7 +449,7 @@ Uses an enum `TrancheConfigField` pattern (one field per call). Updatable fields
 | `senior_cooldown_seconds` | — | Senior cooldown |
 | `junior_cooldown_seconds` | — | Junior cooldown |
 
-Fee bounds validated; returns `InvalidFee` if exceeded.
+Fee bounds validated; returns `InvalidFee` if exceeded. Invalid whole-number `risk_k` values return `InvalidRiskConfig`.
 
 #### `set_paused`
 **Signer:** Authority
@@ -521,6 +522,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `MathOverflow` | Checked arithmetic failure |
 | `Unauthorized` | Caller is not the authority |
 | `InvalidFee` | Fee parameter exceeds bounds |
+| `InvalidRiskConfig` | `risk_k` is fractional or does not fit in `u32` |
 | `JuniorShortfall` | Auto-pause triggered by junior price collapse |
 | `VaultWaitingPeriodNotZero` | Vault has non-zero withdrawal waiting period (v1 unsupported) |
 | `InvalidVault` | Vault account mismatch or wrong owner |
@@ -536,6 +538,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `RequestWithdrawEvent` | user, receipt_id, is_senior, tokens_escrowed, asset_value, timestamp | `request_withdraw_*` |
 | `CompleteWithdrawEvent` | user, receipt_id, is_senior, final_value, tokens_burned | `complete_withdraw` |
 | `CancelWithdrawEvent` | user, receipt_id, tokens_returned | `cancel_withdraw` |
+| `UpdateTrancheConfigEvent` | authority, field_index, slot | `update_tranche_config` |
 | `CrankAccountingEvent` | delta, senior_nav, junior_nav, reserve_nav, total_nav, base_apr, coverage_ratio, slot | `crank_accounting` |
 
 ---
