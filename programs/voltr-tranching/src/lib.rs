@@ -36,4 +36,8 @@ pub mod voltr_tranching {
     ) -> Result<()> {
         instructions::update_tranche_config::handler(ctx, field)
     }
+
+    pub fn set_paused(ctx: Context<SetPaused>, paused: u8) -> Result<()> {
+        instructions::set_paused::handler(ctx, paused)
+    }
 }

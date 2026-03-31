@@ -526,6 +526,7 @@ Withdraws accumulated protocol reserve (performance fees):
 | `JuniorShortfall` | Auto-pause triggered by junior price collapse |
 | `VaultWaitingPeriodNotZero` | Vault has non-zero withdrawal waiting period (v1 unsupported) |
 | `InvalidVault` | Vault account mismatch or wrong owner |
+| `InvalidPauseFlags` | `set_paused` received bits outside `0x0F` |
 
 ---
 
