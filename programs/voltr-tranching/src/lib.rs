@@ -21,4 +21,12 @@ pub mod voltr_tranching {
     ) -> Result<()> {
         instructions::initialize_tranche_config::handler(ctx, params)
     }
+
+    pub fn transfer_authority(ctx: Context<TransferAuthority>) -> Result<()> {
+        instructions::transfer_authority::handler(ctx)
+    }
+
+    pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
+        instructions::accept_authority::handler(ctx)
+    }
 }
