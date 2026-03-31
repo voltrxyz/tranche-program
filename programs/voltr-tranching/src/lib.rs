@@ -96,4 +96,8 @@ pub mod voltr_tranching {
     ) -> Result<()> {
         instructions::instant_withdraw_junior::handler(ctx, amount, is_token_amount)
     }
+
+    pub fn withdraw_reserve(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
+        instructions::withdraw_reserve::handler(ctx, amount)
+    }
 }
