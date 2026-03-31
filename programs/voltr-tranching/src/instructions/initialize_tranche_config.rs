@@ -23,6 +23,7 @@ pub struct InitializeTrancheConfigParams {
     pub min_coverage_buffer_bps: u16,
     pub senior_cooldown_seconds: u64,
     pub junior_cooldown_seconds: u64,
+    pub max_observation_age_seconds: u64,
 }
 
 #[derive(Accounts)]
@@ -174,6 +175,9 @@ pub fn handle_initialize_tranche_config(
     // Withdrawal config
     config.senior_cooldown_seconds = params.senior_cooldown_seconds;
     config.junior_cooldown_seconds = params.junior_cooldown_seconds;
+
+    // APR feed config
+    config.max_observation_age_seconds = params.max_observation_age_seconds;
 
     // Operational
     config.paused = 0;

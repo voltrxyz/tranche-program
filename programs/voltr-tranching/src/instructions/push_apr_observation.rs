@@ -81,6 +81,15 @@ pub fn handle_push_apr_observation(ctx: Context<PushAprObservation>) -> Result<(
 
         let time_window = newest.timestamp.saturating_sub(oldest.timestamp);
 
+        // ── Stale feed guard ────────────────────────────────────────
+        // If the observation window exceeds max_observation_age_seconds,
+        // the feed is stale (keeper was down too long). Preserve the last
+        // known base_apr_bps and let the buffer heal with fresh pushes.
+        let max_age = ctx.accounts.tranche_config.load()?.max_observation_age_seconds;
+        if max_age > 0 && time_window as u64 > max_age {
+            return Ok(());
+        }
+
         // Only compute APR if we have a meaningful time window (> 0 seconds)
         if time_window > 0 {
             let newest_nav =
