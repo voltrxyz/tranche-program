@@ -30,7 +30,10 @@ pub mod voltr_tranching {
         instructions::crank_accounting::handler(ctx)
     }
 
-    pub fn crank_accounting(ctx: Context<CrankAccounting>) -> Result<()> {
-        instructions::crank_accounting::handler(ctx)
+    pub fn update_tranche_config(
+        ctx: Context<UpdateTrancheConfig>,
+        field: TrancheConfigField,
+    ) -> Result<()> {
+        instructions::update_tranche_config::handler(ctx, field)
     }
 }

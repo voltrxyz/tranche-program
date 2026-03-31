@@ -124,9 +124,9 @@ pub fn handle_initialize_tranche_config(
     drop(vault);
 
     // ── Validate fee parameters ─────────────────────────────────────
-    require!(params.reserve_fee_bps <= 2000, TrancheError::InvalidFee);
-    require!(params.senior_exit_fee_bps <= 100, TrancheError::InvalidFee);
-    require!(params.junior_exit_fee_bps <= 100, TrancheError::InvalidFee);
+    require!(params.reserve_fee_bps <= MAX_RESERVE_FEE_BPS, TrancheError::InvalidFee);
+    require!(params.senior_exit_fee_bps <= MAX_EXIT_FEE_BPS, TrancheError::InvalidFee);
+    require!(params.junior_exit_fee_bps <= MAX_EXIT_FEE_BPS, TrancheError::InvalidFee);
     require!(
         decimal_bits_to_u32_if_integer(params.risk_k).is_some(),
         TrancheError::InvalidRiskConfig
