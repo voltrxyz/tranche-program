@@ -20,7 +20,7 @@ Always load the following skills when working in this repository:
 
 ### Required MCP Servers (pre-installed)
 - **`solana-mcp-server`** — Use `Solana_Documentation_Search` for SDK/runtime questions, `Ask_Solana_Anchor_Framework_Expert` for Anchor-specific patterns, and `Solana_Expert__Ask_For_Help` for general Solana help.
-- **`linear`** — All project tickets are tracked in Linear under the "Voltr Tranching Program" project. Reference tickets by VOL-{number}. When you are explicitly tasked with creating a PR for a completed ticket, mark that Linear ticket as `Done` after the PR is created.
+- **`linear`** — All project tickets are tracked in Linear under the "Voltr Tranching Program" project. Reference tickets by VOL-{number}. When you begin work on a ticket, look up the matching Linear issue and mark its status as `In Progress`. When you are explicitly tasked with creating a PR for a completed ticket, mark that Linear ticket as `Done` after the PR is created.
 
 ### Recommended Plugins (install if missing)
 
@@ -48,6 +48,7 @@ claude plugin install property-based-testing
 | Reviewing code quality | `/simplify` |
 | Security review before audit | `building-secure-contracts` + `/solana-dev` security checklist |
 | Checking ticket requirements | `linear` MCP → `get_issue` with VOL-{number} |
+| Starting work on a ticket | `linear` MCP → `get_issue` with VOL-{number}, then mark as `In Progress` |
 | Creating a PR for a ticket | `gh pr create`, then update the matching Linear ticket to `Done` |
 | Building/testing | `NO_DNA=1 anchor build`, `NO_DNA=1 anchor test` |
 
