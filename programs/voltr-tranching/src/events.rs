@@ -59,6 +59,15 @@ pub struct UpdateTrancheConfigEvent {
 
 #[event]
 #[derive(Default)]
+pub struct InstantWithdrawEvent {
+    pub user: Pubkey,
+    pub is_senior: bool,
+    pub asset_amount: u64,
+    pub tokens_burned: u64,
+}
+
+#[event]
+#[derive(Default)]
 pub struct CrankAccountingEvent {
     pub delta: i128,
     pub senior_nav: u128,

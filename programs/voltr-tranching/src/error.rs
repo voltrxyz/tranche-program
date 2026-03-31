@@ -49,4 +49,7 @@ pub enum TrancheError {
 
     #[msg("Invalid pause flags: only bits 0-3 are valid")]
     InvalidPauseFlags,
+
+    #[msg("Instant withdrawal requires cooldown_seconds == 0")]
+    CooldownMustBeZero,
 }
