@@ -19,6 +19,10 @@ pub mod voltr_tranching {
         ctx: Context<InitializeTrancheConfig>,
         params: InitializeTrancheConfigParams,
     ) -> Result<()> {
-        instructions::initialize_tranche_config::handler(ctx, params)
+        instructions::initialize_tranche_config::handle_initialize_tranche_config(ctx, params)
+    }
+
+    pub fn push_apr_observation(ctx: Context<PushAprObservation>) -> Result<()> {
+        instructions::push_apr_observation::handle_push_apr_observation(ctx)
     }
 }

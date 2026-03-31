@@ -102,7 +102,7 @@ pub struct InitializeTrancheConfig<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
+pub fn handle_initialize_tranche_config(
     ctx: Context<InitializeTrancheConfig>,
     params: InitializeTrancheConfigParams,
 ) -> Result<()> {
