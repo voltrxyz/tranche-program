@@ -1,9 +1,19 @@
-pub use voltr_vault::utils::{
-    CheckedCeilDiv, Decimal, DecimalExtra, SafeMath, U128, U256,
-};
+pub use voltr_vault::utils::{CheckedCeilDiv, Decimal, DecimalExtra, SafeMath, U128, U256};
 
 pub const BPS_PRECISION: u16 = 10_000;
 pub const SECONDS_PER_YEAR: u64 = 31_557_600;
+pub const DECIMAL_FRACTION_BITS: u32 = 48;
+
+pub fn decimal_bits_to_u32_if_integer(bits: [u8; 16]) -> Option<u32> {
+    let raw = u128::from_le_bytes(bits);
+    let fraction_mask = (1u128 << DECIMAL_FRACTION_BITS) - 1;
+
+    if raw & fraction_mask != 0 {
+        return None;
+    }
+
+    u32::try_from(raw >> DECIMAL_FRACTION_BITS).ok()
+}
 
 #[cfg(test)]
 mod tests {
@@ -93,7 +103,10 @@ mod tests {
         let b = Decimal::from_num(200);
         assert_eq!(a.safe_add(b).unwrap(), Decimal::from_num(300));
         assert_eq!(b.safe_sub(a).unwrap(), Decimal::from_num(100));
-        assert_eq!(a.safe_mul(Decimal::from_num(3)).unwrap(), Decimal::from_num(300));
+        assert_eq!(
+            a.safe_mul(Decimal::from_num(3)).unwrap(),
+            Decimal::from_num(300)
+        );
         assert_eq!(b.safe_div(a).unwrap(), Decimal::from_num(2));
     }
 
@@ -136,6 +149,22 @@ mod tests {
         let bits = Decimal::ZERO.to_decimal_bits();
         assert_eq!(bits, 0);
         assert_eq!(Decimal::from_decimal_bits(0), Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_decimal_bits_to_u32_if_integer_accepts_whole_values() {
+        let bits = Decimal::from_num(7u64).to_decimal_bits().to_le_bytes();
+        assert_eq!(decimal_bits_to_u32_if_integer(bits), Some(7));
+    }
+
+    #[test]
+    fn test_decimal_bits_to_u32_if_integer_rejects_fractional_values() {
+        let bits = Decimal::from_num(7u64)
+            .safe_div(Decimal::from_num(2u64))
+            .unwrap()
+            .to_decimal_bits()
+            .to_le_bytes();
+        assert_eq!(decimal_bits_to_u32_if_integer(bits), None);
     }
 
     // ─── Decimal floor / ceil (token amount conversion) ─────────
@@ -189,10 +218,7 @@ mod tests {
     fn test_full_mul_int_ratio_large() {
         // U256 intermediate prevents overflow for large values
         let val = Decimal::from_num(1_000_000);
-        let result = val.full_mul_int_ratio(
-            U256::from(u128::MAX / 2),
-            U256::from(u128::MAX / 2),
-        );
+        let result = val.full_mul_int_ratio(U256::from(u128::MAX / 2), U256::from(u128::MAX / 2));
         assert_eq!(result, Decimal::from_num(1_000_000));
     }
 
@@ -205,7 +231,11 @@ mod tests {
         let deposit = 100u128;
         let total_supply = 1000u128;
         let total_assets = 2000u128;
-        let to_mint = deposit.safe_mul(total_supply).unwrap().safe_div(total_assets).unwrap();
+        let to_mint = deposit
+            .safe_mul(total_supply)
+            .unwrap()
+            .safe_div(total_assets)
+            .unwrap();
         assert_eq!(to_mint, 50u128);
     }
 
@@ -236,8 +266,16 @@ mod tests {
         // 333 * 100 / 10_000 = 3.33 → ceil = 4 (protocol-favoring)
         let amount = 333u128;
         let fee_bps = 100u128;
-        let fee_floor = amount.safe_mul(fee_bps).unwrap().safe_div(u128::from(BPS_PRECISION)).unwrap();
-        let fee_ceil = amount.safe_mul(fee_bps).unwrap().safe_div_ceil(u128::from(BPS_PRECISION)).unwrap();
+        let fee_floor = amount
+            .safe_mul(fee_bps)
+            .unwrap()
+            .safe_div(u128::from(BPS_PRECISION))
+            .unwrap();
+        let fee_ceil = amount
+            .safe_mul(fee_bps)
+            .unwrap()
+            .safe_div_ceil(u128::from(BPS_PRECISION))
+            .unwrap();
         assert_eq!(fee_floor, 3);
         assert_eq!(fee_ceil, 4);
     }
@@ -253,8 +291,16 @@ mod tests {
 
         // Fees: round up amount collected (more fee = protocol-favoring)
         let amount = 1001u128;
-        let fee_floor = amount.safe_mul(100).unwrap().safe_div(u128::from(BPS_PRECISION)).unwrap();
-        let fee_ceil = amount.safe_mul(100).unwrap().safe_div_ceil(u128::from(BPS_PRECISION)).unwrap();
+        let fee_floor = amount
+            .safe_mul(100)
+            .unwrap()
+            .safe_div(u128::from(BPS_PRECISION))
+            .unwrap();
+        let fee_ceil = amount
+            .safe_mul(100)
+            .unwrap()
+            .safe_div_ceil(u128::from(BPS_PRECISION))
+            .unwrap();
         assert!(fee_ceil >= fee_floor);
     }
 
