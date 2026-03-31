@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 use crate::constants::*;
 use crate::error::TrancheError;
 use crate::events::UpdateTrancheConfigEvent;
+use crate::math::decimal_bits_to_u32_if_integer;
 use crate::state::TrancheConfig;
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -70,6 +71,10 @@ pub fn handler(ctx: Context<UpdateTrancheConfig>, field: TrancheConfigField) -> 
                 config.risk_y_bps = val;
             }
             TrancheConfigField::RiskK(val) => {
+                require!(
+                    decimal_bits_to_u32_if_integer(val).is_some(),
+                    TrancheError::InvalidRiskConfig
+                );
                 config.risk_k = val;
             }
             TrancheConfigField::ReserveFeeBps(val) => {
