@@ -174,14 +174,17 @@ pub fn handler(
 
     require!(token_amount > 0, TrancheError::ZeroAmount);
 
-    // ── 6. Apply exit fee ────────────────────────────────────────────────
-    let fee = asset_value.mul_int_ratio(
-        u128::from(config.senior_exit_fee_bps),
-        u128::from(BPS_PRECISION),
-    );
+    // ── 6. Apply exit fee (rounded up — protocol-favoring) ───────────────
+    let fee = asset_value
+        .safe_mul(Decimal::from_num(config.senior_exit_fee_bps))?
+        .safe_div_ceil(Decimal::from_num(BPS_PRECISION))?;
     let net_asset = asset_value.safe_sub(fee)?;
 
-    // Add fee to reserve_nav
+    // Transfer fee from senior NAV to reserve NAV (internal accounting move,
+    // total_nav is unchanged). Without this, repeated request/cancel cycles
+    // would inflate reserve_nav without a corresponding senior_nav reduction.
+    let new_senior_nav = read_decimal(&config.senior_nav).safe_sub(fee)?;
+    config.senior_nav = write_decimal(new_senior_nav);
     let new_reserve_nav = read_decimal(&config.reserve_nav).safe_add(fee)?;
     config.reserve_nav = write_decimal(new_reserve_nav);
 
