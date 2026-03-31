@@ -95,6 +95,12 @@ pub struct TrancheConfig {
     /// Junior withdrawal cooldown in seconds.
     pub junior_cooldown_seconds: u64,
 
+    // ── APR Feed Config ─────────────────────────────────────────
+    /// Maximum age (seconds) of the oldest observation before the feed is
+    /// considered stale. When stale, `push_apr_observation` preserves the
+    /// last known `base_apr_bps` instead of annualizing over a too-old window.
+    pub max_observation_age_seconds: u64,
+
     // ── Operational ───────────────────────────────────────────────
     /// Bitflag pause state (0x01=senior deposits, 0x02=junior deposits,
     /// 0x04=senior withdrawals, 0x08=junior withdrawals).
@@ -120,7 +126,7 @@ pub struct TrancheConfig {
 
     // ── Reserved ──────────────────────────────────────────────────
     /// Reserved space for future expansion.
-    pub _reserved: [u8; 256],
+    pub _reserved: [u8; 248],
 }
 
 // ─── WithdrawReceipt (standard account) ───────────────────────────────────────
@@ -207,9 +213,10 @@ mod tests {
     fn tranche_config_is_repr_c() {
         // 7 Pubkeys (224) + 6 DecimalBits fields (96) + index_timestamp (8) +
         // APR bps fields (6) + _padding0 (2) + base_apr_bps (2) + fee bps (6) +
-        // coverage bps (6) + _padding1 (2) + cooldowns (16) + paused (1) +
+        // coverage bps (6) + _padding1 (2) + cooldowns (16) +
+        // max_observation_age_seconds (8) + paused (1) +
         // _padding2 (7) + next_receipt_id (8) + bumps (5) + _padding3 (3) +
-        // _reserved (256)
+        // _reserved (248)
         assert_eq!(mem::size_of::<TrancheConfig>(), 648);
         assert_eq!(mem::align_of::<TrancheConfig>(), 8);
     }
@@ -247,7 +254,7 @@ mod tests {
     fn tranche_config_has_reserved_space() {
         // The _reserved field should be exactly 256 bytes.
         let config = unsafe { mem::zeroed::<TrancheConfig>() };
-        assert_eq!(config._reserved.len(), 256);
+        assert_eq!(config._reserved.len(), 248);
     }
 
     // ─── Zero Initialization ──────────────────────────────────────

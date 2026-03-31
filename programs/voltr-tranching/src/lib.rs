@@ -19,7 +19,26 @@ pub mod voltr_tranching {
         ctx: Context<InitializeTrancheConfig>,
         params: InitializeTrancheConfigParams,
     ) -> Result<()> {
-        instructions::initialize_tranche_config::handler(ctx, params)
+        instructions::initialize_tranche_config::handle_initialize_tranche_config(ctx, params)
+    }
+
+    pub fn push_apr_observation(ctx: Context<PushAprObservation>) -> Result<()> {
+        instructions::push_apr_observation::handle_push_apr_observation(ctx)
+    }
+
+    pub fn crank_accounting(ctx: Context<CrankAccounting>) -> Result<()> {
+        instructions::crank_accounting::handler(ctx)
+    }
+
+    pub fn update_tranche_config(
+        ctx: Context<UpdateTrancheConfig>,
+        field: TrancheConfigField,
+    ) -> Result<()> {
+        instructions::update_tranche_config::handler(ctx, field)
+    }
+
+    pub fn set_paused(ctx: Context<SetPaused>, paused: u8) -> Result<()> {
+        instructions::set_paused::handler(ctx, paused)
     }
 
     pub fn transfer_authority(ctx: Context<TransferAuthority>) -> Result<()> {
