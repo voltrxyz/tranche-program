@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+pub mod error;
+pub mod events;
 pub mod math;
 pub mod state;
 
