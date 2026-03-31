@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(Decimal::from_num(5).checked_pow(0), Some(Decimal::ONE));
     }
 
-    // ─── Decimal bits storage (u128 on-chain representation) ────
+    // ─── Decimal bits representation roundtrip ──────────────────
 
     #[test]
     fn test_decimal_bits_roundtrip() {

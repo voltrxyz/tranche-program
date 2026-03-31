@@ -1,5 +1,11 @@
 use anchor_lang::prelude::*;
 
+/// Little-endian bytes of `Decimal::to_decimal_bits()`.
+///
+/// Zero-copy accounts store Decimal values as bytes instead of `u128` so their
+/// alignment stays compatible with Anchor's 8-byte discriminator offset.
+pub type DecimalBits = [u8; 16];
+
 /// Maximum number of APR observations in the ring buffer (~3 days at hourly intervals).
 pub const MAX_APR_OBSERVATIONS: usize = 72;
 
@@ -7,9 +13,9 @@ pub const MAX_APR_OBSERVATIONS: usize = 72;
 //
 // PDA: [b"tranche_config", vault.key()]
 //
-// All `u128` NAV and index fields store `Decimal` (U80F48) values via
-// `to_decimal_bits()`. Reconstruct with `Decimal::from_decimal_bits(field)`
-// before arithmetic.
+// All Decimal fields in zero-copy accounts store the little-endian bytes of
+// `Decimal::to_decimal_bits()`. Reconstruct them with
+// `Decimal::from_decimal_bits(u128::from_le_bytes(field))` before arithmetic.
 
 #[account(zero_copy(unsafe))]
 #[repr(C)]
@@ -37,17 +43,17 @@ pub struct TrancheConfig {
 
     // ── NAV Tracking (Decimal bits via `to_decimal_bits()`) ──────
     /// Total net asset value.
-    pub total_nav: u128,
+    pub total_nav: DecimalBits,
     /// Senior tranche NAV.
-    pub senior_nav: u128,
+    pub senior_nav: DecimalBits,
     /// Junior tranche NAV.
-    pub junior_nav: u128,
+    pub junior_nav: DecimalBits,
     /// Protocol reserve NAV (accumulated performance fees).
-    pub reserve_nav: u128,
+    pub reserve_nav: DecimalBits,
 
     // ── Senior Target ─────────────────────────────────────────────
     /// Compound growth index (Decimal bits, init: `Decimal::ONE`).
-    pub senior_target_index: u128,
+    pub senior_target_index: DecimalBits,
     /// Last index update timestamp.
     pub index_timestamp: i64,
 
@@ -58,10 +64,10 @@ pub struct TrancheConfig {
     pub risk_x_bps: u16,
     /// Risk premium constant Y in basis points.
     pub risk_y_bps: u16,
-    /// Padding to align `risk_k` to 8-byte boundary.
+    /// Explicit padding for stable layout.
     pub _padding0: [u8; 2],
     /// Risk premium exponent K (Decimal bits).
-    pub risk_k: u128,
+    pub risk_k: DecimalBits,
     /// Current vault base APR in basis points.
     pub base_apr_bps: u16,
 
@@ -80,7 +86,7 @@ pub struct TrancheConfig {
     pub min_coverage_for_mint_bps: u16,
     /// Coverage buffer for senior minting in basis points.
     pub min_coverage_buffer_bps: u16,
-    /// Padding to align next field to 8-byte boundary.
+    /// Explicit padding for stable layout.
     pub _padding1: [u8; 2],
 
     // ── Withdrawal Config ─────────────────────────────────────────
@@ -144,15 +150,14 @@ pub struct WithdrawReceipt {
 
 impl WithdrawReceipt {
     /// Fixed account size (excluding 8-byte Anchor discriminator).
-    pub const INIT_SPACE: usize =
-        32 +    // tranche_config (Pubkey)
+    pub const INIT_SPACE: usize = 32 +    // tranche_config (Pubkey)
         32 +    // user (Pubkey)
         8 +     // receipt_id (u64)
         1 +     // is_senior (bool)
         8 +     // tranche_tokens_escrowed (u64)
         16 +    // asset_amount_at_request (u128)
         8 +     // withdrawable_from_ts (i64)
-        1;      // bump (u8)
+        1; // bump (u8)
 }
 
 // ─── AprFeed (zero-copy) ─────────────────────────────────────────────────────
@@ -182,12 +187,12 @@ pub struct AprFeed {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AprObservation {
     /// Vault NAV at observation time (Decimal bits).
-    pub vault_nav: u128,
+    pub vault_nav: DecimalBits,
     /// Vault LP token supply at observation time (Decimal bits).
-    pub vault_lp_supply: u128,
+    pub vault_lp_supply: DecimalBits,
     /// Unix timestamp of the observation.
     pub timestamp: i64,
-    /// Padding to maintain 16-byte alignment.
+    /// Reserved padding for future expansion and stable 48-byte slots.
     pub _padding: [u8; 8],
 }
 
@@ -209,17 +214,13 @@ mod tests {
 
     #[test]
     fn tranche_config_is_repr_c() {
-        // Ensure the struct compiles and has a deterministic size.
-        let size = mem::size_of::<TrancheConfig>();
-        // 7 Pubkeys (224) + 4 u128 NAVs (64) + senior_target_index u128 (16) +
-        // index_timestamp i64 (8) + APR bps fields (6) + _padding0 (2) +
-        // risk_k u128 (16) + base_apr_bps u16 (2) + fee bps (6) +
-        // coverage bps (6) + _padding1 (2) + cooldowns (16) +
-        // paused u8 (1) + _padding2 (7) + next_receipt_id u64 (8) +
-        // bumps (5) + _padding3 (3) + _reserved (256)
-        assert!(size > 0, "TrancheConfig has non-zero size");
-        // Ensure 8-byte alignment
-        assert_eq!(size % 8, 0, "TrancheConfig should be 8-byte aligned");
+        // 7 Pubkeys (224) + 6 DecimalBits fields (96) + index_timestamp (8) +
+        // APR bps fields (6) + _padding0 (2) + base_apr_bps (2) + fee bps (6) +
+        // coverage bps (6) + _padding1 (2) + cooldowns (16) + paused (1) +
+        // _padding2 (7) + next_receipt_id (8) + bumps (5) + _padding3 (3) +
+        // _reserved (256)
+        assert_eq!(mem::size_of::<TrancheConfig>(), 648);
+        assert_eq!(mem::align_of::<TrancheConfig>(), 8);
     }
 
     #[test]
@@ -231,15 +232,15 @@ mod tests {
 
     #[test]
     fn apr_feed_is_repr_c() {
-        let size = mem::size_of::<AprFeed>();
-        assert!(size > 0, "AprFeed has non-zero size");
-        assert_eq!(size % 8, 0, "AprFeed should be 8-byte aligned");
+        assert_eq!(mem::size_of::<AprFeed>(), 3464);
+        assert_eq!(mem::align_of::<AprFeed>(), 8);
     }
 
     #[test]
     fn apr_observation_size() {
-        // u128 (16) + u128 (16) + i64 (8) + _padding (8) = 48 bytes
+        // DecimalBits (16) + DecimalBits (16) + i64 (8) + _padding (8) = 48 bytes
         assert_eq!(mem::size_of::<AprObservation>(), 48);
+        assert_eq!(mem::align_of::<AprObservation>(), 8);
     }
 
     #[test]
@@ -287,10 +288,10 @@ mod tests {
         let config = unsafe { mem::zeroed::<TrancheConfig>() };
         assert_eq!(config.paused, 0);
         assert_eq!(config.next_receipt_id, 0);
-        assert_eq!(config.total_nav, 0);
-        assert_eq!(config.senior_nav, 0);
-        assert_eq!(config.junior_nav, 0);
-        assert_eq!(config.reserve_nav, 0);
+        assert_eq!(config.total_nav, [0; 16]);
+        assert_eq!(config.senior_nav, [0; 16]);
+        assert_eq!(config.junior_nav, [0; 16]);
+        assert_eq!(config.reserve_nav, [0; 16]);
     }
 
     #[test]
@@ -299,8 +300,8 @@ mod tests {
         assert_eq!(feed.head, 0);
         assert_eq!(feed.count, 0);
         for obs in &feed.observations {
-            assert_eq!(obs.vault_nav, 0);
-            assert_eq!(obs.vault_lp_supply, 0);
+            assert_eq!(obs.vault_nav, [0; 16]);
+            assert_eq!(obs.vault_lp_supply, [0; 16]);
             assert_eq!(obs.timestamp, 0);
         }
     }
