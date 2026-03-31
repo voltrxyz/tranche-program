@@ -110,6 +110,7 @@ pub fn handler(
         vault.lp.mint == ctx.accounts.vault_lp_mint.key(),
         TrancheError::InvalidVault
     );
+    let vault_redemption_fee_bps = vault.fee_configuration.redemption_fee;
     drop(vault);
 
     let lp_balance = ctx.accounts.vault_lp_custody.amount;
@@ -169,21 +170,16 @@ pub fn handler(
     require!(junior_nav > Decimal::ZERO, TrancheError::ZeroAmount);
 
     let (token_amount, asset_value) = if is_token_amount {
-        let asset_val = Decimal::from_num(amount).full_mul_int_ratio(
-            junior_nav.to_decimal_bits(),
-            u128::from(junior_supply),
-        );
+        // asset_value = amount * nav / supply
+        let ratio = junior_nav.safe_div(Decimal::from_num(junior_supply))?;
+        let asset_val = Decimal::from_num(amount).safe_mul(ratio)?;
         (amount, asset_val)
     } else {
-        let tokens = Decimal::from_num(amount).full_mul_int_ratio(
-            u128::from(junior_supply),
-            junior_nav.to_decimal_bits(),
-        );
-        let token_amt: u64 = tokens.to_ceil(); // round up tokens burned (protocol-favoring)
-        let asset_val = Decimal::from_num(token_amt).full_mul_int_ratio(
-            junior_nav.to_decimal_bits(),
-            u128::from(junior_supply),
-        );
+        // tokens = amount * supply / nav
+        let ratio = Decimal::from_num(junior_supply).safe_div(junior_nav)?;
+        let token_amt: u64 = Decimal::from_num(amount).safe_mul(ratio)?.to_ceil();
+        let nav_ratio = junior_nav.safe_div(Decimal::from_num(junior_supply))?;
+        let asset_val = Decimal::from_num(token_amt).safe_mul(nav_ratio)?;
         (token_amt, asset_val)
     };
 
@@ -203,12 +199,24 @@ pub fn handler(
     config.junior_nav = write_decimal(new_junior_nav);
 
     // ── 7. Junior ratio check (pre-withdrawal) ──────────────────────────
+    // Estimate the actual NAV cost including vault redemption fee.
+    // The vault burns LP worth: net_asset * 10000 / (10000 - redemption_fee_bps).
+    let estimated_nav_cost = if vault_redemption_fee_bps > 0 {
+        let fee_denominator = BPS_PRECISION.saturating_sub(vault_redemption_fee_bps);
+        require!(fee_denominator > 0, TrancheError::MathOverflow);
+        net_asset.safe_mul(Decimal::from_num(BPS_PRECISION))?
+            .safe_div_ceil(Decimal::from_num(fee_denominator))?
+    } else {
+        net_asset
+    };
+
     let senior_nav = crank_result.senior_nav;
     let min_junior_required = senior_nav.mul_int_ratio(
         u128::from(config.min_jr_sr_ratio_bps),
         u128::from(BPS_PRECISION),
     );
-    let post_withdraw_junior_nav = junior_nav.safe_sub(asset_value)?;
+    // Use new_junior_nav (after exit fee deduction) as the starting point.
+    let post_withdraw_junior_nav = new_junior_nav.safe_sub(estimated_nav_cost)?;
     require!(
         post_withdraw_junior_nav >= min_junior_required,
         TrancheError::JuniorRatioBreach
@@ -255,15 +263,25 @@ pub fn handler(
         false, // is_withdraw_all = false
     )?;
 
-    // ── 8b. Measure actual LP burned ─────────────────────────────────────
+    // ── 8b. Measure actual LP burned using post-CPI vault state ──────────
+    // The vault may accrue management fees during CPI (minting fee LP before
+    // pricing the withdrawal), so we must reload vault state for accurate
+    // LP valuation. Using pre-CPI state would over-decrement tranche NAV.
     ctx.accounts.vault_lp_custody.reload()?;
+    ctx.accounts.vault_lp_mint.reload()?;
+    let post_vault = ctx.accounts.vault.load()?;
+    let post_vault_total_value = post_vault.get_total_asset_value();
+    let post_vault_lp_supply =
+        post_vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    drop(post_vault);
+
     let lp_after = ctx.accounts.vault_lp_custody.amount;
     let lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let actual_value_lost =
-        Decimal::from_num(lp_burned).full_mul_int_ratio(vault_total_value, vault_lp_supply);
+    let actual_value_lost = Decimal::from_num(lp_burned)
+        .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
 
     // ── 9. Transfer: asset_escrow → user ─────────────────────────────────
     token::transfer(
