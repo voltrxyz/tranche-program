@@ -4,7 +4,10 @@ use anchor_spl::token::{Mint, TokenAccount};
 use crate::constants::*;
 use crate::error::TrancheError;
 use crate::events::CrankAccountingEvent;
-use crate::math::{Decimal, DecimalExtra, SafeMath, BPS_PRECISION, SECONDS_PER_YEAR};
+use crate::math::{
+    decimal_bits_to_u32_if_integer, Decimal, DecimalExtra, SafeMath, BPS_PRECISION,
+    SECONDS_PER_YEAR,
+};
 use crate::state::TrancheConfig;
 
 /// Reads a `DecimalBits` field (little-endian `[u8; 16]`) back into a `Decimal`.
@@ -15,6 +18,30 @@ fn read_decimal(bits: &[u8; 16]) -> Decimal {
 /// Writes a `Decimal` value into its `DecimalBits` representation.
 fn write_decimal(val: Decimal) -> [u8; 16] {
     val.to_decimal_bits().to_le_bytes()
+}
+
+fn apply_senior_target_accrual(
+    old_index: Decimal,
+    index_timestamp: i64,
+    now: i64,
+    senior_apr: Decimal,
+    has_realized_gain: bool,
+) -> Result<(Decimal, i64, Decimal)> {
+    if !has_realized_gain {
+        return Ok((old_index, index_timestamp, Decimal::ZERO));
+    }
+
+    let elapsed = now.saturating_sub(index_timestamp) as u64;
+    let growth = if elapsed > 0 {
+        senior_apr
+            .safe_mul(Decimal::from_num(elapsed))?
+            .safe_div(Decimal::from_num(SECONDS_PER_YEAR))?
+    } else {
+        Decimal::ZERO
+    };
+
+    let new_index = old_index.safe_mul(Decimal::ONE.safe_add(growth)?)?;
+    Ok((new_index, now, growth))
 }
 
 #[derive(Accounts)]
@@ -50,8 +77,7 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
     // ── 1. Read vault state (no CPI) ─────────────────────────────────────
     let vault = ctx.accounts.vault.load()?;
     let vault_total_value = vault.get_total_asset_value();
-    let vault_lp_supply =
-        vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
+    let vault_lp_supply = vault.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
 
     require!(
         vault.lp.mint == ctx.accounts.vault_lp_mint.key(),
@@ -81,8 +107,7 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
     let current_nav = if vault_lp_supply == 0 {
         Decimal::ZERO
     } else {
-        Decimal::from_num(our_lp_balance)
-            .full_mul_int_ratio(vault_total_value, vault_lp_supply)
+        Decimal::from_num(our_lp_balance).full_mul_int_ratio(vault_total_value, vault_lp_supply)
     };
 
     let total_nav = read_decimal(&config.total_nav);
@@ -100,33 +125,28 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
         let gain = current_nav.safe_sub(total_nav)?;
         delta = gain.to_decimal_bits() as i128;
 
+        let senior_apr = if gain > Decimal::ZERO {
+            compute_senior_apr(&config, senior_nav, current_nav)?
+        } else {
+            Decimal::ZERO
+        };
+        let (new_index, new_index_timestamp, growth) = apply_senior_target_accrual(
+            read_decimal(&config.senior_target_index),
+            config.index_timestamp,
+            now,
+            senior_apr,
+            gain > Decimal::ZERO,
+        )?;
+        config.senior_target_index = write_decimal(new_index);
+        config.index_timestamp = new_index_timestamp;
+
         if gain > Decimal::ZERO {
             // Step 1: Reserve fee (protocol-favoring)
-            let reserve_gain = gain.mul_int_ratio(
-                config.reserve_fee_bps as u128,
-                BPS_PRECISION as u128,
-            );
+            let reserve_gain =
+                gain.mul_int_ratio(config.reserve_fee_bps as u128, BPS_PRECISION as u128);
 
             // Step 2: Net gain after reserve fee
             let net_gain = gain.safe_sub(reserve_gain)?;
-
-            // Step 3: Compute senior APR via risk premium formula
-            let senior_apr = compute_senior_apr(&config, senior_nav, current_nav)?;
-
-            // Step 4: Update senior target index with compound growth
-            let elapsed = now.saturating_sub(config.index_timestamp) as u64;
-            let old_index = read_decimal(&config.senior_target_index);
-
-            let growth = if elapsed > 0 {
-                senior_apr
-                    .safe_mul(Decimal::from_num(elapsed))?
-                    .safe_div(Decimal::from_num(SECONDS_PER_YEAR))?
-            } else {
-                Decimal::ZERO
-            };
-
-            let new_index = old_index.safe_mul(Decimal::ONE.safe_add(growth)?)?;
-            config.senior_target_index = write_decimal(new_index);
 
             // Step 5: Senior target gain = senior_nav * growth
             let senior_target_gain = senior_nav.safe_mul(growth)?;
@@ -144,8 +164,6 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
             junior_nav = junior_nav.safe_add(junior_gain)?;
             reserve_nav = reserve_nav.safe_add(reserve_gain)?;
         }
-
-        config.index_timestamp = now;
     } else {
         // ── LOSS PATH ────────────────────────────────────────────────
         let loss = total_nav.safe_sub(current_nav)?;
@@ -182,14 +200,10 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
             };
             senior_nav = senior_nav.safe_sub(senior_loss)?;
         }
-
-        config.index_timestamp = now;
     }
 
     // ── 5. Write updated NAVs ────────────────────────────────────────────
-    let new_total_nav = senior_nav
-        .safe_add(junior_nav)?
-        .safe_add(reserve_nav)?;
+    let new_total_nav = senior_nav.safe_add(junior_nav)?.safe_add(reserve_nav)?;
     config.total_nav = write_decimal(new_total_nav);
     config.senior_nav = write_decimal(senior_nav);
     config.junior_nav = write_decimal(junior_nav);
@@ -205,9 +219,7 @@ pub fn handler(ctx: Context<CrankAccounting>) -> Result<()> {
     // ── 7. Build event fields before dropping config ─────────────────────
     let base_apr = config.base_apr_bps;
     let coverage_ratio = if senior_nav > Decimal::ZERO {
-        new_total_nav
-            .safe_div(senior_nav)?
-            .to_decimal_bits()
+        new_total_nav.safe_div(senior_nav)?.to_decimal_bits()
     } else {
         0u128
     };
@@ -246,16 +258,15 @@ fn compute_senior_apr(
     }
 
     let sr_ratio = senior_nav.safe_div(total_nav)?;
-    let risk_k = read_decimal(&config.risk_k);
-    let risk_k_exp: u32 = risk_k.to_floor();
+    let risk_k_exp = decimal_bits_to_u32_if_integer(config.risk_k)
+        .ok_or(error!(TrancheError::InvalidRiskConfig))?;
 
     let sr_ratio_pow = sr_ratio
         .checked_pow(risk_k_exp)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let risk_premium = Decimal::from_bps(config.risk_x_bps as u64).safe_add(
-        Decimal::from_bps(config.risk_y_bps as u64).safe_mul(sr_ratio_pow)?,
-    )?;
+    let risk_premium = Decimal::from_bps(config.risk_x_bps as u64)
+        .safe_add(Decimal::from_bps(config.risk_y_bps as u64).safe_mul(sr_ratio_pow)?)?;
 
     let base_apr = Decimal::from_bps(config.base_apr_bps as u64);
 
@@ -266,4 +277,36 @@ fn compute_senior_apr(
     };
 
     Ok(if computed > floor { computed } else { floor })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_accrual_keeps_timestamp_when_no_gain_is_realized() {
+        let old_index = Decimal::ONE;
+        let senior_apr = Decimal::from_percent(10u64);
+
+        let (new_index, new_timestamp, growth) =
+            apply_senior_target_accrual(old_index, 100, 200, senior_apr, false).unwrap();
+
+        assert_eq!(new_index, old_index);
+        assert_eq!(new_timestamp, 100);
+        assert_eq!(growth, Decimal::ZERO);
+    }
+
+    #[test]
+    fn target_accrual_compounds_full_elapsed_window_on_gain() {
+        let old_index = Decimal::ONE;
+        let senior_apr = Decimal::from_percent(10u64);
+        let now = SECONDS_PER_YEAR as i64;
+
+        let (new_index, new_timestamp, growth) =
+            apply_senior_target_accrual(old_index, 0, now, senior_apr, true).unwrap();
+
+        assert_eq!(growth, Decimal::from_percent(10u64));
+        assert_eq!(new_index, Decimal::from_percent(110u64));
+        assert_eq!(new_timestamp, now);
+    }
 }
