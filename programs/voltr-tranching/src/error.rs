@@ -43,4 +43,7 @@ pub enum TrancheError {
 
     #[msg("Vault account mismatch or invalid owner")]
     InvalidVault,
+
+    #[msg("Invalid pause flags: only bits 0-3 are valid")]
+    InvalidPauseFlags,
 }
