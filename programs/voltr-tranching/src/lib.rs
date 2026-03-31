@@ -40,4 +40,12 @@ pub mod voltr_tranching {
     pub fn set_paused(ctx: Context<SetPaused>, paused: u8) -> Result<()> {
         instructions::set_paused::handler(ctx, paused)
     }
+
+    pub fn transfer_authority(ctx: Context<TransferAuthority>) -> Result<()> {
+        instructions::transfer_authority::handler(ctx)
+    }
+
+    pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
+        instructions::accept_authority::handler(ctx)
+    }
 }
