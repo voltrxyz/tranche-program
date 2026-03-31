@@ -368,15 +368,14 @@ The two-step withdrawal flow protects against cooldown gaming and ensures fair p
 #### `request_withdraw_senior`
 **Signer:** User
 
-1. Validate: not paused (`0x04`), amount > 0
+1. Validate: not paused (`0x04`), amount > 0, senior supply > 0, senior NAV > 0
 2. Inline `crank_accounting()`
 3. Calculate token/asset amounts based on `is_token_amount` flag
-4. Apply exit fee: `net_asset = asset_value * (10_000 - senior_exit_fee_bps) / 10_000`
-5. `reserve_nav += fee_amount`
-6. Transfer senior tokens → WithdrawReceipt escrow
-7. Create WithdrawReceipt PDA with `withdrawable_from_ts = now + senior_cooldown_seconds`
-8. Increment `next_receipt_id`
-9. Emit `RequestWithdrawEvent`
+4. Apply exit fee: `fee = asset_value * senior_exit_fee_bps / 10_000` (rounded up), `net_asset = asset_value - fee`
+5. `reserve_nav += fee`
+6. Transfer senior tokens → `senior_token_escrow` (ATA owned by `tranche_authority`)
+7. Increment `next_receipt_id`, create WithdrawReceipt PDA with `withdrawable_from_ts = now + senior_cooldown_seconds`
+8. Emit `RequestWithdrawEvent`
 
 #### `request_withdraw_junior`
 **Signer:** User
