@@ -6,7 +6,7 @@ use anchor_spl::{
 
 use crate::constants::*;
 use crate::error::TrancheError;
-use crate::math::{Decimal, DecimalExtra};
+use crate::math::{decimal_bits_to_u32_if_integer, Decimal, DecimalExtra};
 use crate::state::{AprFeed, TrancheConfig};
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -126,6 +126,10 @@ pub fn handle_initialize_tranche_config(
     require!(params.reserve_fee_bps <= 2000, TrancheError::InvalidFee);
     require!(params.senior_exit_fee_bps <= 100, TrancheError::InvalidFee);
     require!(params.junior_exit_fee_bps <= 100, TrancheError::InvalidFee);
+    require!(
+        decimal_bits_to_u32_if_integer(params.risk_k).is_some(),
+        TrancheError::InvalidRiskConfig
+    );
 
     // ── Initialize TrancheConfig ────────────────────────────────────
     let mut config = ctx.accounts.tranche_config.load_init()?;

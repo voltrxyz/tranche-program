@@ -25,4 +25,8 @@ pub mod voltr_tranching {
     pub fn push_apr_observation(ctx: Context<PushAprObservation>) -> Result<()> {
         instructions::push_apr_observation::handle_push_apr_observation(ctx)
     }
+
+    pub fn crank_accounting(ctx: Context<CrankAccounting>) -> Result<()> {
+        instructions::crank_accounting::handler(ctx)
+    }
 }

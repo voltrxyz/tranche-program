@@ -35,6 +35,9 @@ pub enum TrancheError {
     #[msg("Fee parameter exceeds maximum allowed value")]
     InvalidFee,
 
+    #[msg("Risk exponent must be a whole-number value that fits in u32")]
+    InvalidRiskConfig,
+
     #[msg("Junior tranche shortfall detected, auto-pause triggered")]
     JuniorShortfall,
 
