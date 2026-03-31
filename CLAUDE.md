@@ -126,6 +126,7 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 
 **PDA:** `[b"tranche_config", voltr_vault.key()]`
 **Attributes:** `#[account(zero_copy(unsafe))]`, `#[repr(C)]`
+**DecimalBits:** little-endian `[u8; 16]` bytes of `Decimal::to_decimal_bits()`, used in zero-copy accounts to keep Anchor loading alignment-safe.
 
 | Field Group | Fields | Type | Description |
 |------------|--------|------|-------------|
@@ -136,16 +137,16 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 | | `junior_mint` | `Pubkey` | Junior tranche token mint |
 | **Voltr Integration** | `lp_custody` | `Pubkey` | ATA holding vault LP tokens |
 | | `asset_mint` | `Pubkey` | Underlying asset (e.g., USDC) |
-| **NAV Tracking** | `total_nav` | `u128` | Total net asset value (Decimal bits via `to_decimal_bits()`) |
-| | `senior_nav` | `u128` | Senior tranche NAV (Decimal bits) |
-| | `junior_nav` | `u128` | Junior tranche NAV (Decimal bits) |
-| | `reserve_nav` | `u128` | Protocol reserve (Decimal bits) |
-| **Senior Target** | `senior_target_index` | `u128` | Compound growth index (Decimal bits, init: `Decimal::ONE`) |
+| **NAV Tracking** | `total_nav` | `DecimalBits` | Total net asset value (little-endian bytes of `to_decimal_bits()`) |
+| | `senior_nav` | `DecimalBits` | Senior tranche NAV (little-endian Decimal bits) |
+| | `junior_nav` | `DecimalBits` | Junior tranche NAV (little-endian Decimal bits) |
+| | `reserve_nav` | `DecimalBits` | Protocol reserve (little-endian Decimal bits) |
+| **Senior Target** | `senior_target_index` | `DecimalBits` | Compound growth index (little-endian Decimal bits, init: `Decimal::ONE`) |
 | | `index_timestamp` | `i64` | Last index update time |
 | **APR Parameters** | `apr_floor_bps` | `u16` | Minimum senior APR (basis points) |
 | | `risk_x_bps` | `u16` | Risk premium constant X |
 | | `risk_y_bps` | `u16` | Risk premium constant Y |
-| | `risk_k` | `u128` | Risk premium exponent K (Decimal bits) |
+| | `risk_k` | `DecimalBits` | Risk premium exponent K (little-endian Decimal bits) |
 | | `base_apr_bps` | `u16` | Current vault base APR |
 | **Fee Parameters** | `reserve_fee_bps` | `u16` | Performance fee (max 2000 = 20%) |
 | | `senior_exit_fee_bps` | `u16` | Senior withdrawal fee (max 100 = 1%) |
@@ -189,9 +190,9 @@ The `tranche_authority` PDA acts as the depositor identity in Voltr Vault, custo
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `vault_nav` | `DecimalBits` | Vault NAV at observation |
+| `vault_lp_supply` | `DecimalBits` | Vault LP token supply |
 | `timestamp` | `i64` | Unix timestamp |
-| `vault_nav` | `u128` | Vault NAV at observation |
-| `vault_lp_supply` | `u128` | Vault LP token supply |
 
 ---
 
@@ -218,7 +219,7 @@ All NAV, APR, and waterfall calculations re-use the **Voltr Vault math utilities
 
 | Type / Trait | Description |
 |-------------|-------------|
-| `Decimal` (`U80F48`) | Binary fixed-point type for ratios, indices, and per-share prices. Stored on-chain as `u128` via `to_decimal_bits()` / `from_decimal_bits()` |
+| `Decimal` (`U80F48`) | Binary fixed-point type for ratios, indices, and per-share prices. Logically represented as `u128` bits; zero-copy accounts persist those bits as little-endian `[u8; 16]` via `to_decimal_bits().to_le_bytes()` |
 | `SafeMath` | Checked `safe_add`, `safe_sub`, `safe_mul`, `safe_div`, `safe_div_ceil` for `u128`, `u64`, `Decimal`, and other primitives |
 | `DecimalExtra` | `from_bps()`, `to_bps()`, `from_percent()`, `checked_pow()`, `mul_int_ratio()`, `full_mul_int_ratio()`, `to_floor()`, `to_ceil()` |
 | `CheckedCeilDiv` | `checked_ceil_div()` for integer types |
@@ -238,7 +239,7 @@ All NAV, APR, and waterfall calculations re-use the **Voltr Vault math utilities
 let fee = amount.safe_mul(fee_bps as u128)?.safe_div_ceil(BPS_PRECISION as u128)?;
 ```
 
-**Ratios and indices** use `Decimal`, stored on-chain as `u128` (Decimal bits):
+**Ratios and indices** use `Decimal`. In zero-copy accounts, persist `to_decimal_bits().to_le_bytes()` and reconstruct with `u128::from_le_bytes(...)` before `Decimal::from_decimal_bits(...)`:
 ```rust
 let ratio = Decimal::from_num(deposit_amount).full_mul_int_ratio(total_supply, total_nav);
 let tokens_to_mint: u64 = ratio.to_floor(); // round down for minting
@@ -279,7 +280,7 @@ Creates a new TrancheConfig wrapping a Voltr Vault. Initializes all derived acco
 - `vault.withdrawal_waiting_period == 0` (v1 constraint)
 - Mint authority for both tranche mints = `tranche_authority`
 
-**Initial state:** `senior_target_index = Decimal::ONE` (stored as `Decimal::ONE.to_decimal_bits()`), `index_timestamp = Clock::now`
+**Initial state:** `senior_target_index = Decimal::ONE` (stored as `Decimal::ONE.to_decimal_bits().to_le_bytes()`), `index_timestamp = Clock::now`
 
 ---
 
