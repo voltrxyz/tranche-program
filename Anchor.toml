@@ -7,7 +7,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-voltr_tranching = "EvVxBE31HKE3QdRZXZB7gkkPTcMcAPKGTWJKAvoGuZoX"
+voltr_tranching = "HcqA5TydrpKnVotpjp5fNFdKp8sXktcp92Pz6Z6hCjpF"
 
 [registry]
 url = "https://api.apr.dev"
@@ -16,12 +16,22 @@ url = "https://api.apr.dev"
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
-[test]
-startup_wait = 50000
-
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 50000
+shutdown_wait = 2000
+upgradeable = false
 
 [[test.genesis]]
 address = "vVoLTRjQmtFpiYoegx285Ze4gsLJ8ZxgFKVcuvmG1a8"
 program = "tests/fixtures/voltr_vault.so"
+
+[test.validator]
+# Surfpool replaces solana-test-validator as the test runtime.
+# Start with: surfpool start --legacy-anchor-compatibility --anchor-test-config-path ./Anchor.toml --no-tui --offline
+# Then run:   anchor test --skip-local-validator
+bind_address = "0.0.0.0"
+ledger = ".anchor/test-ledger"
+rpc_port = 8899

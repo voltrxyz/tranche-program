@@ -5,7 +5,7 @@ use crate::constants::*;
 use crate::error::TrancheError;
 use crate::events::WithdrawReserveEvent;
 use crate::instructions::crank_accounting::{read_decimal, run_inline_crank, write_decimal};
-use crate::math::{Decimal, DecimalExtra, SafeMath};
+use crate::math::{Decimal, DecimalExtra, SafeMath, BPS_PRECISION};
 use crate::state::TrancheConfig;
 
 #[derive(Accounts)]
@@ -93,6 +93,7 @@ pub fn handler(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
         vault.lp.mint == ctx.accounts.vault_lp_mint.key(),
         TrancheError::InvalidVault
     );
+    let vault_redemption_fee_bps = vault.fee_configuration.redemption_fee;
     drop(vault);
 
     let lp_balance = ctx.accounts.vault_lp_custody.amount;
@@ -121,17 +122,31 @@ pub fn handler(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
         now,
     )?;
 
-    // -- 4. Calculate withdrawal amount (capped at reserve_nav) --------------
+    // -- 4. Calculate withdrawal amount ----------------------------------------
+    // In a shared vault with redemption fees, the LP position delta (actual_value_lost)
+    // exceeds the cash withdrawn because the fee portion is retained for other LP
+    // holders. Cap the withdrawal so the worst-case position delta stays within
+    // reserve_nav, ensuring the full cost is charged to reserve — not leaked to
+    // junior/senior via a later crank.
     let reserve_nav = read_decimal(&config.reserve_nav);
     let total_nav = read_decimal(&config.total_nav);
 
     require!(reserve_nav > Decimal::ZERO, TrancheError::ZeroAmount);
     require!(total_nav > Decimal::ZERO, TrancheError::ZeroAmount);
 
-    // Cap the requested amount at reserve_nav
-    let withdraw_amount_decimal = Decimal::from_num(amount);
-    let actual_withdraw = if withdraw_amount_decimal >= reserve_nav {
+    // max_withdrawable = reserve_nav * (BPS - redemption_fee_bps) / BPS
+    // This ensures: withdraw_amount * BPS / (BPS - fee) <= reserve_nav
+    let max_withdrawable = if vault_redemption_fee_bps > 0 {
+        let net_bps = BPS_PRECISION.saturating_sub(vault_redemption_fee_bps);
+        require!(net_bps > 0, TrancheError::MathOverflow);
+        reserve_nav.mul_int_ratio(u128::from(net_bps), u128::from(BPS_PRECISION))
+    } else {
         reserve_nav
+    };
+
+    let withdraw_amount_decimal = Decimal::from_num(amount);
+    let actual_withdraw = if withdraw_amount_decimal >= max_withdrawable {
+        max_withdrawable
     } else {
         withdraw_amount_decimal
     };
@@ -184,7 +199,7 @@ pub fn handler(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
     ctx.accounts.vault_lp_mint.reload()?;
 
     let lp_after = ctx.accounts.vault_lp_custody.amount;
-    let lp_burned: u64 = lp_balance
+    let _lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
@@ -194,8 +209,14 @@ pub fn handler(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
         vault_post.get_total_lp_supply_incl_fees(ctx.accounts.vault_lp_mint.supply)?;
     drop(vault_post);
 
-    let actual_value_lost =
-        Decimal::from_num(lp_burned).full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    // Measure the change in LP position value (pre minus post).
+    // This correctly excludes the vault's redemption fee, which burns extra LP
+    // but keeps the corresponding assets in the vault for remaining LP holders.
+    let pre_position_value = Decimal::from_num(lp_balance)
+        .full_mul_int_ratio(vault_total_value, vault_lp_supply);
+    let post_position_value = Decimal::from_num(lp_after)
+        .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    let actual_value_lost = pre_position_value.safe_sub(post_position_value)?;
 
     // -- 7. Transfer: asset_escrow -> authority destination -------------------
     token::transfer(
@@ -212,21 +233,15 @@ pub fn handler(ctx: Context<WithdrawReserve>, amount: u64) -> Result<()> {
     )?;
 
     // -- 8. Update NAVs ------------------------------------------------------
-    // Cap at reserve_nav to prevent underflow when the vault's redemption fee
-    // makes actual_value_lost slightly exceed reserve_nav on full withdrawals.
-    // The tiny residual is corrected by the next inline crank, which recomputes
-    // total_nav from the true LP position.
+    // Deduct actual_value_lost (the full LP position delta) from reserve and total.
+    // Because we capped the withdrawal amount pre-CPI so that the worst-case
+    // position delta stays within reserve_nav, actual_value_lost <= reserve_nav
+    // and this subtraction is safe.
     let mut config = ctx.accounts.tranche_config.load_mut()?;
-    let reserve_nav = read_decimal(&config.reserve_nav);
-    let nav_deduction = if actual_value_lost > reserve_nav {
-        reserve_nav
-    } else {
-        actual_value_lost
-    };
-    let new_reserve_nav = reserve_nav.safe_sub(nav_deduction)?;
+    let new_reserve_nav = read_decimal(&config.reserve_nav).safe_sub(actual_value_lost)?;
     config.reserve_nav = write_decimal(new_reserve_nav);
 
-    let new_total_nav = read_decimal(&config.total_nav).safe_sub(nav_deduction)?;
+    let new_total_nav = read_decimal(&config.total_nav).safe_sub(actual_value_lost)?;
     config.total_nav = write_decimal(new_total_nav);
 
     drop(config);

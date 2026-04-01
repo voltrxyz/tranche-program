@@ -444,6 +444,15 @@ describe("voltr-tranching adversarial tests", () => {
     );
   });
 
+  // Surfpool in offline mode doesn't auto-advance blocks. Advance the slot
+  // before each test so every transaction gets a fresh blockhash.
+  beforeEach(async () => {
+    const slot = await provider.connection.getSlot();
+    await (provider.connection as any)._rpcRequest("surfnet_timeTravel", [
+      { absoluteSlot: slot + 1 },
+    ]);
+  });
+
   // ─── Vault + Tranche Init ──────────────────────────────────────────────
 
   it("initializes Voltr protocol", async () => {
@@ -684,9 +693,10 @@ describe("voltr-tranching adversarial tests", () => {
 
   describe("2: Cooldown gaming", () => {
     it("withdrawal value is capped at request-time snapshot", async () => {
-      // Set a cooldown so we can test the two-step flow
+      // Set a meaningful cooldown (60s) to test the two-step flow.
+      // We use surfnet_timeTravel to advance past the cooldown instantly.
       await trancheProgram.methods
-        .updateTrancheConfig({ seniorCooldownSeconds: [new BN(1)] })
+        .updateTrancheConfig({ seniorCooldownSeconds: [new BN(60)] })
         .accounts({ authority, trancheConfig: tranchePdas.trancheConfig })
         .rpc();
 
@@ -707,8 +717,12 @@ describe("voltr-tranching adversarial tests", () => {
       const rcpt = await trancheProgram.account.withdrawReceipt.fetch(receipt);
       const snapshotValue = rcpt.assetAmountAtRequest;
 
-      // Wait for cooldown
-      await new Promise((r) => setTimeout(r, 2000));
+      // Time-travel past the cooldown using surfnet_timeTravel
+      const currentSlot = await provider.connection.getSlot();
+      // Advance ~150 slots (60s at 400ms/slot) to be safely past cooldown
+      await (provider.connection as any)._rpcRequest("surfnet_timeTravel", [
+        { absoluteSlot: currentSlot + 200 },
+      ]);
 
       // Complete — value should be capped at snapshot
       const assetBefore = await bal(userAssetAta);
@@ -1285,12 +1299,27 @@ describe("voltr-tranching adversarial tests", () => {
       }
       assert.isTrue(thrown, "Should fail before cooldown expires");
 
-      // Clean up: cancel the receipt
+      // Use surfnet_timeTravel to advance past the 1-day cooldown
+      const currentSlot = await provider.connection.getSlot();
+      // 86400s / 0.4s per slot = 216000 slots
+      await (provider.connection as any)._rpcRequest("surfnet_timeTravel", [
+        { absoluteSlot: currentSlot + 220000 },
+      ]);
+
+      // Now complete should succeed
+      const assetBefore = await bal(userAssetAta);
       await trancheProgram.methods
-        .cancelWithdraw()
-        .accounts(cancelWithdrawAccounts(receipt, true))
+        .completeWithdraw()
+        .accounts(completeWithdrawAccounts(receipt, true))
         .signers([userKp])
         .rpc();
+
+      const assetAfter = await bal(userAssetAta);
+      assert.isTrue(assetAfter > assetBefore, "Assets received after cooldown elapsed");
+
+      // Receipt should be closed
+      const info = await provider.connection.getAccountInfo(receipt);
+      assert.isNull(info, "Receipt closed after completion");
 
       // Reset cooldown
       await trancheProgram.methods

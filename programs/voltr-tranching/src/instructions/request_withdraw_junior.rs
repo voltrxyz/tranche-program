@@ -185,10 +185,14 @@ pub fn handler(
     // The vault burns LP worth: asset_value * 10000 / (10000 - redemption_fee_bps).
     // Use this inflated cost for the ratio gate so that complete_withdraw won't
     // fail the post-CPI ratio check due to higher-than-expected LP burn.
+    // This is deliberately conservative: it may reject some borderline requests,
+    // but it prevents requests that charge a non-refundable exit fee and then
+    // fail at completion.
     let estimated_nav_cost = if vault_redemption_fee_bps > 0 {
         let fee_denominator = BPS_PRECISION.saturating_sub(vault_redemption_fee_bps);
         require!(fee_denominator > 0, TrancheError::MathOverflow);
-        net_asset.safe_mul(Decimal::from_num(BPS_PRECISION))?
+        net_asset
+            .safe_mul(Decimal::from_num(BPS_PRECISION))?
             .safe_div_ceil(Decimal::from_num(fee_denominator))?
     } else {
         net_asset
@@ -199,8 +203,6 @@ pub fn handler(
         u128::from(config.min_jr_sr_ratio_bps),
         u128::from(BPS_PRECISION),
     );
-    // Use new_junior_nav (after exit fee deduction) as the starting point.
-    // estimated_nav_cost accounts for the vault redemption fee on top of net_asset.
     let post_withdraw_junior_nav = new_junior_nav.safe_sub(estimated_nav_cost)?;
     require!(
         post_withdraw_junior_nav >= min_junior_required,
