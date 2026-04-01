@@ -2766,6 +2766,7 @@ dependencies = [
 [[package]]
 name = "voltr-vault"
 version = "0.2.0"
+source = "git+ssh://git@github.com/voltrxyz/vault-program.git?rev=908399ada636e74a97dcd7b9de5e34504441672e#908399ada636e74a97dcd7b9de5e34504441672e"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
