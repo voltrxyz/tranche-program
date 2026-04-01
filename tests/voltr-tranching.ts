@@ -426,11 +426,15 @@ describe("voltr-tranching integration", () => {
   // ─── Vault Setup ─────────────────────────────────────────────────────────
 
   it("initializes Voltr protocol", async () => {
-    await vaultProgram.methods
-      .initProtocol(8191) // all operations enabled
-      .accounts({ payer, admin: protocolAdminKp.publicKey })
-      .signers([payerKp, protocolAdminKp])
-      .rpc();
+    try {
+      await vaultProgram.methods
+        .initProtocol(8191) // all operations enabled
+        .accounts({ payer, admin: protocolAdminKp.publicKey })
+        .signers([payerKp, protocolAdminKp])
+        .rpc();
+    } catch {
+      // Protocol may already be initialized by another test suite — OK
+    }
 
     const proto = await vaultProgram.account.protocol.fetch(vaultPdas.protocol);
     assert.equal(proto.operationalState, 8191);
