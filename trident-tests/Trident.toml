@@ -1,0 +1,10 @@
+[fuzz.metrics]
+enabled = true
+
+[[fuzz.programs]]
+address = "EvVxBE31HKE3QdRZXZB7gkkPTcMcAPKGTWJKAvoGuZoX"
+program = "../target/deploy/voltr_tranching.so"
+
+[[fuzz.programs]]
+address = "vVoLTRjQmtFpiYoegx285Ze4gsLJ8ZxgFKVcuvmG1a8"
+program = "../tests/fixtures/voltr_vault.so"
