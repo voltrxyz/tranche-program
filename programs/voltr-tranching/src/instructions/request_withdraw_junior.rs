@@ -99,6 +99,7 @@ pub fn handler(
         vault.lp.mint == ctx.accounts.vault_lp_mint.key(),
         TrancheError::InvalidVault
     );
+    let vault_redemption_fee_bps = vault.fee_configuration.redemption_fee;
     drop(vault);
 
     let lp_balance = ctx.accounts.vault_lp_custody.amount;
@@ -180,17 +181,29 @@ pub fn handler(
     config.junior_nav = write_decimal(new_junior_nav);
 
     // ── 7. Junior ratio check ──────────────────────────────────────────
-    // Use net_asset as the estimated NAV cost. The authoritative ratio check
-    // happens post-CPI in complete_withdraw using the actual LP position delta,
-    // so this pre-CPI gate only needs a reasonable estimate. Using net_asset
-    // directly avoids the inflated cost from the vault redemption fee markup
-    // which was spuriously blocking valid withdrawals.
+    // Estimate the actual NAV cost including vault redemption fee.
+    // The vault burns LP worth: asset_value * 10000 / (10000 - redemption_fee_bps).
+    // Use this inflated cost for the ratio gate so that complete_withdraw won't
+    // fail the post-CPI ratio check due to higher-than-expected LP burn.
+    // This is deliberately conservative: it may reject some borderline requests,
+    // but it prevents requests that charge a non-refundable exit fee and then
+    // fail at completion.
+    let estimated_nav_cost = if vault_redemption_fee_bps > 0 {
+        let fee_denominator = BPS_PRECISION.saturating_sub(vault_redemption_fee_bps);
+        require!(fee_denominator > 0, TrancheError::MathOverflow);
+        net_asset
+            .safe_mul(Decimal::from_num(BPS_PRECISION))?
+            .safe_div_ceil(Decimal::from_num(fee_denominator))?
+    } else {
+        net_asset
+    };
+
     let senior_nav = crank_result.senior_nav;
     let min_junior_required = senior_nav.mul_int_ratio(
         u128::from(config.min_jr_sr_ratio_bps),
         u128::from(BPS_PRECISION),
     );
-    let post_withdraw_junior_nav = new_junior_nav.safe_sub(net_asset)?;
+    let post_withdraw_junior_nav = new_junior_nav.safe_sub(estimated_nav_cost)?;
     require!(
         post_withdraw_junior_nav >= min_junior_required,
         TrancheError::JuniorRatioBreach
