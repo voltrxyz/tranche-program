@@ -382,6 +382,7 @@ The two-step withdrawal flow protects against cooldown gaming and ensures fair p
 
 Same as senior request, plus:
 - **Junior ratio check:** `junior_nav - asset_value >= senior_nav * min_jr_sr_ratio_bps / 10_000`
+- Exit fee uses `safe_div_ceil` (rounded up, protocol-favoring) — same pattern as senior
 - Uses `junior_exit_fee_bps` and `junior_cooldown_seconds`
 - Pause flag: `0x08`
 
@@ -565,7 +566,7 @@ Withdraws accumulated protocol reserve (performance fees):
 - All account owners validated via typed `Account<'info, T>` or explicit owner check
 - All signer requirements explicit via `Signer<'info>` or `has_one`
 - PDA seeds and canonical bumps validated by Anchor
-- Token mint ↔ token account relationships validated
+- Token mint ↔ token account relationships validated (all `user_asset_ata` and `asset_escrow` accounts have explicit `token::mint = asset_mint` constraints in withdrawal instructions)
 - No `init_if_needed` used anywhere
 - No duplicate mutable accounts possible
 - Voltr Vault program ID validated via `Program<'info, T>`
@@ -575,7 +576,7 @@ Withdraws accumulated protocol reserve (performance fees):
 
 - All math uses `checked_*` / `safe_*` operations via Voltr Vault's `Decimal` (U80F48) and `SafeMath` traits
 - No unchecked casts (u128 → u64 must be checked)
-- Rounding always favors the protocol (`.to_floor()` for minting, `.to_ceil()` / `safe_div_ceil()` for fees)
+- Rounding always favors the protocol (`.to_floor()` for minting, `.to_ceil()` / `safe_div_ceil()` for fees — both senior and junior exit fees use `safe_div_ceil`)
 - U256 intermediates prevent overflow in `full_mul_int_ratio()` for large proportional calculations
 
 ---
