@@ -216,6 +216,17 @@ describe("voltr-tranching integration", () => {
     );
   });
 
+  // Surfpool in offline mode doesn't auto-advance blocks. Advance the slot
+  // before each test so every transaction gets a fresh blockhash and identical
+  // instruction sequences (e.g. parameterless crankAccounting) aren't rejected
+  // as "transaction already processed".
+  beforeEach(async () => {
+    const slot = await provider.connection.getSlot();
+    await (provider.connection as any)._rpcRequest("surfnet_timeTravel", [
+      { absoluteSlot: slot + 1 },
+    ]);
+  });
+
   // ─── Account builders ─────────────────────────────────────────────────────
 
   function depositSeniorAccounts() {
@@ -1287,36 +1298,122 @@ describe("voltr-tranching integration", () => {
     });
   });
 
-  describe("VOL-27: Deposit pause enforcement and authority unpause", () => {
-    // NOTE: The auto-pause *mechanism* (crank_accounting sets bits 0x01|0x02
-    // when junior_nav==0 && junior_supply>0) is tested in Rust unit tests:
+  describe("VOL-27: Auto-pause via vault loss (Surfpool surfnet_setAccount)", () => {
+    // TC6 now exercises the real auto-pause path: we use surfnet_setAccount to
+    // patch the Voltr Vault's asset.total_value field to simulate a catastrophic
+    // loss that wipes out junior NAV, then call crank_accounting and verify the
+    // auto-pause bits (0x01|0x02) are set by the program itself.
+    //
+    // Complementary Rust unit tests remain for coverage:
     //   crank_accounting::tests::run_inline_crank_auto_pauses_on_junior_wipeout
     //   crank_accounting::tests::run_inline_crank_auto_pause_exact_junior_wipeout
     //   crank_accounting::tests::run_inline_crank_auto_pause_ors_into_existing_flags
     //   crank_accounting::tests::run_inline_crank_no_auto_pause_when_junior_supply_zero
     //   crank_accounting::tests::run_inline_crank_no_auto_pause_on_partial_junior_loss
-    //
-    // Simulating a vault loss in integration tests requires direct account data
-    // manipulation (e.g. bankrun/LiteSVM setAccount) which the standard Anchor
-    // test-validator does not support. These integration tests instead verify
-    // that pause bits 0x01|0x02 (the same bits auto-pause sets) correctly block
-    // deposits and that the authority can clear them.
 
-    it("TC6: deposit pause bits (0x01|0x02) block both deposit types, withdrawals still work", async () => {
-      // Verify current state is unpaused
-      let config = await getConfig();
-      assert.equal(config.paused, 0, "Should start unpaused");
-
-      // Set the same bits that auto-pause would set: 0x01 | 0x02
+    it("TC6: crank_accounting auto-pauses deposits when vault loss wipes out junior", async () => {
+      // Ensure unpaused and well-funded state
       await trancheProgram.methods
-        .setPaused(0x03)
+        .setPaused(0x00)
         .accounts({ authority, trancheConfig: tranchePdas.trancheConfig })
         .rpc();
 
-      config = await getConfig();
-      assert.equal(config.paused, 0x03, "Pause bits 0x01|0x02 should be set");
+      // Deposit junior and senior to establish meaningful NAVs
+      await trancheProgram.methods
+        .depositJunior(new BN(1_000_000_000)) // 1000 USDC
+        .accounts(depositJuniorAccounts())
+        .signers([userKp])
+        .rpc();
+      await trancheProgram.methods
+        .depositSenior(new BN(500_000_000)) // 500 USDC
+        .accounts(depositSeniorAccounts())
+        .signers([userKp])
+        .rpc();
 
-      // Verify senior deposits blocked
+      // Sync NAV before manipulation
+      await trancheProgram.methods
+        .crankAccounting()
+        .accounts(crankAccounts())
+        .signers([userKp])
+        .rpc();
+
+      let config = await getConfig();
+      const juniorNavBefore = readDecimalBits(config.juniorNav as any);
+      const totalNavBefore = readDecimalBits(config.totalNav as any);
+      assert.isTrue(juniorNavBefore > 0, "Junior NAV should be positive");
+      assert.equal(config.paused, 0, "Should be unpaused before loss");
+
+      // ── Patch vault account to simulate catastrophic loss ──────────────
+      // Read raw vault account data
+      const vaultAccountInfo = await provider.connection.getAccountInfo(vault);
+      assert.isNotNull(vaultAccountInfo, "Vault account must exist");
+
+      const vaultData = Buffer.from(vaultAccountInfo!.data);
+
+      // asset.total_value is at offset 168 (8 discriminator + 32 name + 64 desc
+      // + 32 asset.mint + 32 asset.idle_ata = 168), u64 LE
+      const ASSET_TOTAL_VALUE_OFFSET = 168;
+      const originalTotalValue = vaultData.readBigUInt64LE(ASSET_TOTAL_VALUE_OFFSET);
+
+      // Set total_value to near-zero to simulate a loss exceeding junior NAV.
+      // This makes the vault appear to have lost almost all assets.
+      const patchedData = Buffer.from(vaultData);
+      patchedData.writeBigUInt64LE(BigInt(1), ASSET_TOTAL_VALUE_OFFSET); // 1 lamport
+
+      // Use surfnet_setAccount to patch the vault account data
+      await (provider.connection as any)._rpcRequest("surfnet_setAccount", [
+        vault.toBase58(),
+        {
+          data: patchedData.toString("hex"),
+        },
+      ]);
+
+      // Advance slot so next tx gets a fresh blockhash (surfnet_setAccount
+      // doesn't produce a new block, so the crank_accounting tx would collide
+      // with the earlier one that used the same blockhash).
+      const slotAfterPatch = await provider.connection.getSlot();
+      await (provider.connection as any)._rpcRequest("surfnet_timeTravel", [
+        { absoluteSlot: slotAfterPatch + 2 },
+      ]);
+
+      // Verify patch took effect
+      const patchedVaultInfo = await provider.connection.getAccountInfo(vault);
+      const patchedValue = Buffer.from(patchedVaultInfo!.data).readBigUInt64LE(
+        ASSET_TOTAL_VALUE_OFFSET
+      );
+      assert.equal(patchedValue, BigInt(1), "Vault total_value should be patched to 1");
+
+      // ── Call crank_accounting — should trigger auto-pause ──────────────
+      await trancheProgram.methods
+        .crankAccounting()
+        .accounts(crankAccounts())
+        .signers([userKp])
+        .rpc();
+
+      config = await getConfig();
+      const juniorNavAfter = readDecimalBits(config.juniorNav as any);
+      const seniorNavAfter = readDecimalBits(config.seniorNav as any);
+
+      // Auto-pause bits 0x01|0x02 should be set
+      assert.equal(
+        config.paused & 0x03,
+        0x03,
+        `Auto-pause bits should be set (got paused=${config.paused})`
+      );
+
+      // Junior NAV should be wiped out (0 or near-zero)
+      assert.isTrue(
+        juniorNavAfter < 1,
+        `Junior NAV should be ~0 after loss (got ${juniorNavAfter})`
+      );
+
+      // Senior NAV should have absorbed remaining loss after junior wipeout
+      assert.isTrue(
+        seniorNavAfter < totalNavBefore,
+        "Senior NAV should reflect loss absorption"
+      );
+
+      // Verify deposits are actually blocked by auto-pause
       let seniorBlocked = false;
       try {
         await trancheProgram.methods
@@ -1328,9 +1425,8 @@ describe("voltr-tranching integration", () => {
         seniorBlocked = true;
         assert.include(err.toString(), "SeniorDepositsPaused");
       }
-      assert.isTrue(seniorBlocked, "Senior deposits blocked when bit 0x01 set");
+      assert.isTrue(seniorBlocked, "Senior deposits blocked by auto-pause");
 
-      // Verify junior deposits blocked
       let juniorBlocked = false;
       try {
         await trancheProgram.methods
@@ -1342,23 +1438,21 @@ describe("voltr-tranching integration", () => {
         juniorBlocked = true;
         assert.include(err.toString(), "JuniorDepositsPaused");
       }
-      assert.isTrue(juniorBlocked, "Junior deposits blocked when bit 0x02 set");
+      assert.isTrue(juniorBlocked, "Junior deposits blocked by auto-pause");
 
-      // Withdrawals should still work (bits 0x04/0x08 not set)
-      const sBal = await bal(userSeniorAta);
-      if (sBal > BigInt(0)) {
-        const withdrawTokens = new BN((sBal / BigInt(100)).toString());
-        if (withdrawTokens.gt(new BN(0))) {
-          await trancheProgram.methods
-            .instantWithdrawSenior(withdrawTokens, true)
-            .accounts(instantWithdrawSeniorAccounts())
-            .signers([userKp])
-            .rpc();
-        }
-      }
+      // ── Restore vault state ────────────────────────────────────────────
+      // Restore original total_value so subsequent tests aren't affected
+      const restoredData = Buffer.from(patchedData);
+      restoredData.writeBigUInt64LE(originalTotalValue, ASSET_TOTAL_VALUE_OFFSET);
+      await (provider.connection as any)._rpcRequest("surfnet_setAccount", [
+        vault.toBase58(),
+        {
+          data: restoredData.toString("hex"),
+        },
+      ]);
     });
 
-    it("TC7: authority clears pause flags, deposits resume", async () => {
+    it("TC7: authority clears auto-pause flags, deposits resume", async () => {
       // Confirm still paused from TC6
       let config = await getConfig();
       assert.equal(config.paused & 0x03, 0x03, "Still paused from TC6");
@@ -1371,6 +1465,13 @@ describe("voltr-tranching integration", () => {
 
       config = await getConfig();
       assert.equal(config.paused, 0, "Pause flags cleared");
+
+      // Crank to re-sync NAV with restored vault state
+      await trancheProgram.methods
+        .crankAccounting()
+        .accounts(crankAccounts())
+        .signers([userKp])
+        .rpc();
 
       // Senior deposit should now succeed
       const sBefore = await bal(userSeniorAta);

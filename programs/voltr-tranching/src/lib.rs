@@ -9,7 +9,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("EvVxBE31HKE3QdRZXZB7gkkPTcMcAPKGTWJKAvoGuZoX");
+declare_id!("HcqA5TydrpKnVotpjp5fNFdKp8sXktcp92Pz6Z6hCjpF");
 
 #[program]
 pub mod voltr_tranching {
