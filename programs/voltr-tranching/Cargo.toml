@@ -19,4 +19,4 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
 anchor-lang = "0.31.1"
 anchor-spl = "0.31.1"
-voltr-vault = { path = "/Users/shayn/Desktop/voltr/voltr-vault-program/programs/voltr-vault", features = ["cpi"] }
+voltr-vault = { git = "ssh://git@github.com/voltrxyz/vault-program.git", rev = "908399ada636e74a97dcd7b9de5e34504441672e", package = "voltr-vault", features = ["cpi"] }

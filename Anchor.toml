@@ -24,4 +24,4 @@ test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
 [[test.genesis]]
 address = "vVoLTRjQmtFpiYoegx285Ze4gsLJ8ZxgFKVcuvmG1a8"
-program = "/Users/shayn/Desktop/voltr/voltr-vault-program/target/deploy/voltr_vault.so"
+program = "tests/fixtures/voltr_vault.so"
