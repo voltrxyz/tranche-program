@@ -110,7 +110,6 @@ pub fn handler(
         vault.lp.mint == ctx.accounts.vault_lp_mint.key(),
         TrancheError::InvalidVault
     );
-    let vault_redemption_fee_bps = vault.fee_configuration.redemption_fee;
     drop(vault);
 
     let lp_balance = ctx.accounts.vault_lp_custody.amount;
@@ -199,24 +198,17 @@ pub fn handler(
     config.junior_nav = write_decimal(new_junior_nav);
 
     // ── 7. Junior ratio check (pre-withdrawal) ──────────────────────────
-    // Estimate the actual NAV cost including vault redemption fee.
-    // The vault burns LP worth: net_asset * 10000 / (10000 - redemption_fee_bps).
-    let estimated_nav_cost = if vault_redemption_fee_bps > 0 {
-        let fee_denominator = BPS_PRECISION.saturating_sub(vault_redemption_fee_bps);
-        require!(fee_denominator > 0, TrancheError::MathOverflow);
-        net_asset.safe_mul(Decimal::from_num(BPS_PRECISION))?
-            .safe_div_ceil(Decimal::from_num(fee_denominator))?
-    } else {
-        net_asset
-    };
-
+    // Use net_asset as the estimated NAV cost. The authoritative ratio check
+    // happens post-CPI (step 12) using the actual LP position delta, so this
+    // pre-CPI gate only needs a reasonable estimate. Using net_asset directly
+    // avoids the inflated cost from the vault redemption fee markup which was
+    // spuriously blocking valid withdrawals.
     let senior_nav = crank_result.senior_nav;
     let min_junior_required = senior_nav.mul_int_ratio(
         u128::from(config.min_jr_sr_ratio_bps),
         u128::from(BPS_PRECISION),
     );
-    // Use new_junior_nav (after exit fee deduction) as the starting point.
-    let post_withdraw_junior_nav = new_junior_nav.safe_sub(estimated_nav_cost)?;
+    let post_withdraw_junior_nav = new_junior_nav.safe_sub(net_asset)?;
     require!(
         post_withdraw_junior_nav >= min_junior_required,
         TrancheError::JuniorRatioBreach
@@ -276,12 +268,18 @@ pub fn handler(
     drop(post_vault);
 
     let lp_after = ctx.accounts.vault_lp_custody.amount;
-    let lp_burned: u64 = lp_balance
+    let _lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let actual_value_lost = Decimal::from_num(lp_burned)
+    // Measure the change in LP position value (pre minus post).
+    // This correctly excludes the vault's redemption fee, which burns extra LP
+    // but keeps the corresponding assets in the vault for remaining LP holders.
+    let pre_position_value = Decimal::from_num(lp_balance)
+        .full_mul_int_ratio(vault_total_value, vault_lp_supply);
+    let post_position_value = Decimal::from_num(lp_after)
         .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    let actual_value_lost = pre_position_value.safe_sub(post_position_value)?;
 
     // ── 9. Transfer: asset_escrow → user ─────────────────────────────────
     token::transfer(

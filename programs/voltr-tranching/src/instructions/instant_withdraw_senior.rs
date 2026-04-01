@@ -251,12 +251,18 @@ pub fn handler(
     drop(post_vault);
 
     let lp_after = ctx.accounts.vault_lp_custody.amount;
-    let lp_burned: u64 = lp_balance
+    let _lp_burned: u64 = lp_balance
         .checked_sub(lp_after)
         .ok_or(error!(TrancheError::MathOverflow))?;
 
-    let actual_value_lost = Decimal::from_num(lp_burned)
+    // Measure the change in LP position value (pre minus post).
+    // This correctly excludes the vault's redemption fee, which burns extra LP
+    // but keeps the corresponding assets in the vault for remaining LP holders.
+    let pre_position_value = Decimal::from_num(lp_balance)
+        .full_mul_int_ratio(vault_total_value, vault_lp_supply);
+    let post_position_value = Decimal::from_num(lp_after)
         .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    let actual_value_lost = pre_position_value.safe_sub(post_position_value)?;
 
     // ── 8. Transfer: asset_escrow → user ─────────────────────────────────
     token::transfer(
