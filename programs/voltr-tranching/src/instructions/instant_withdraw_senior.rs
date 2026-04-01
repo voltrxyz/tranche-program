@@ -262,8 +262,12 @@ pub fn handler(
     // but keeps the corresponding assets in the vault for remaining LP holders.
     let pre_position_value = Decimal::from_num(lp_balance)
         .full_mul_int_ratio(vault_total_value, vault_lp_supply);
-    let post_position_value = Decimal::from_num(lp_after)
-        .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply);
+    let post_position_value = if lp_after == 0 {
+        Decimal::ZERO
+    } else {
+        Decimal::from_num(lp_after)
+            .full_mul_int_ratio(post_vault_total_value, post_vault_lp_supply)
+    };
     let actual_value_lost = pre_position_value.safe_sub(post_position_value)?;
 
     // ── 8. Transfer: asset_escrow → user ─────────────────────────────────
