@@ -53,6 +53,7 @@ pub struct CompleteWithdraw<'info> {
     /// User's asset token account (receives final withdrawn assets).
     #[account(
         mut,
+        token::mint = asset_mint,
         token::authority = user,
     )]
     pub user_asset_ata: Account<'info, TokenAccount>,

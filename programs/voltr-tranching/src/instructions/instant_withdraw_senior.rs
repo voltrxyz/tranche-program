@@ -46,6 +46,7 @@ pub struct InstantWithdrawSenior<'info> {
     /// User's asset token account (receives withdrawn assets).
     #[account(
         mut,
+        token::mint = asset_mint,
         token::authority = user,
     )]
     pub user_asset_ata: Account<'info, TokenAccount>,
@@ -54,6 +55,7 @@ pub struct InstantWithdrawSenior<'info> {
     /// then transfers to user).
     #[account(
         mut,
+        token::mint = asset_mint,
         token::authority = tranche_authority,
     )]
     pub asset_escrow: Account<'info, TokenAccount>,

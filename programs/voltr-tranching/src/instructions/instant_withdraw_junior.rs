@@ -46,6 +46,7 @@ pub struct InstantWithdrawJunior<'info> {
     /// User's asset token account (receives withdrawn assets).
     #[account(
         mut,
+        token::mint = asset_mint,
         token::authority = user,
     )]
     pub user_asset_ata: Account<'info, TokenAccount>,
@@ -54,6 +55,7 @@ pub struct InstantWithdrawJunior<'info> {
     /// then transfers to user).
     #[account(
         mut,
+        token::mint = asset_mint,
         token::authority = tranche_authority,
     )]
     pub asset_escrow: Account<'info, TokenAccount>,
@@ -184,11 +186,10 @@ pub fn handler(
 
     require!(token_amount > 0, TrancheError::ZeroAmount);
 
-    // ── 6. Apply exit fee ────────────────────────────────────────────────
-    let fee = asset_value.mul_int_ratio(
-        u128::from(config.junior_exit_fee_bps),
-        u128::from(BPS_PRECISION),
-    );
+    // ── 6. Apply exit fee (rounded up — protocol-favoring) ───────────────
+    let fee = asset_value
+        .safe_mul(Decimal::from_num(config.junior_exit_fee_bps))?
+        .safe_div_ceil(Decimal::from_num(BPS_PRECISION))?;
     let net_asset = asset_value.safe_sub(fee)?;
 
     // Add fee to reserve_nav, debit from junior_nav (internal reallocation)
