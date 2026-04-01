@@ -596,8 +596,13 @@ describe("voltr-tranching adversarial tests", () => {
         tranchePdas.juniorMint
       )
     );
-    await provider.connection.sendTransaction(tx, [payerKp]);
-    await new Promise((r) => setTimeout(r, 2000));
+    const sig = await provider.connection.sendTransaction(tx, [payerKp]);
+    const bh = await provider.connection.getLatestBlockhash();
+    await provider.connection.confirmTransaction({
+      blockhash: bh.blockhash,
+      lastValidBlockHeight: bh.lastValidBlockHeight,
+      signature: sig,
+    });
   });
 
   it("seeds initial liquidity (junior + senior)", async () => {

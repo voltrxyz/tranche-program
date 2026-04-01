@@ -577,10 +577,13 @@ describe("voltr-tranching integration", () => {
         tranchePdas.juniorMint
       )
     );
-    await provider.connection.sendTransaction(tx, [payerKp]);
-    // Wait for confirmation
+    const sig = await provider.connection.sendTransaction(tx, [payerKp]);
     const bh = await provider.connection.getLatestBlockhash();
-    await new Promise((r) => setTimeout(r, 2000));
+    await provider.connection.confirmTransaction({
+      blockhash: bh.blockhash,
+      lastValidBlockHeight: bh.lastValidBlockHeight,
+      signature: sig,
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
