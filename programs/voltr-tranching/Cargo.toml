@@ -1,8 +1,9 @@
 [package]
 name = "voltr-tranching"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "Voltr Tranching Program — two-tranche (Senior/Junior) yield structure on top of Voltr Vaults"
 edition = "2021"
+license = "Apache-2.0"
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -19,4 +20,4 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
 anchor-lang = "0.31.1"
 anchor-spl = "0.31.1"
-voltr-vault = { git = "ssh://git@github.com/voltrxyz/vault-program.git", rev = "908399ada636e74a97dcd7b9de5e34504441672e", package = "voltr-vault", features = ["cpi"] }
+voltr-vault = { git = "https://github.com/voltrxyz/vault-program.git", rev = "908399ada636e74a97dcd7b9de5e34504441672e", package = "voltr-vault", features = ["cpi"] }
